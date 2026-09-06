@@ -7,6 +7,35 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!--
+      Required by KhzNative.cs. The bindings read cells through pointers into
+      the native arena; without unsafe blocks every read would be a marshalled
+      copy, which is the opposite of the zero-copy requirement.
+    -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+
+  <!--
+    No PackageReference, deliberately. sqlite3 is linked by the native library
+    from the system, not pulled in here as a NuGet dependency: adding
+    Microsoft.Data.Sqlite or SQLitePCLRaw would introduce a second, separate
+    copy of sqlite and a managed dependency chain the rules exclude.
+
+    The native library is not referenced through the project file either.
+    ProjectReference and PackageReference cannot express "a CMake target built
+    out of tree", and inventing a hardcoded path here would break on every
+    machine but one. Build it with:
+
+      cmake -B build -DCMAKE_BUILD_TYPE=Release
+      cmake --build build
+
+    then put the resulting libkhz_sheet.so, khz_sheet.dll or libkhz_sheet.dylib
+    on the loader path (LD_LIBRARY_PATH, the executable's directory, or a
+    runtimes/<rid>/native folder in a published layout).
+
+    KhzAbi.Verify reports ErrMissing when it is not found, so a missing native
+    library is a status code rather than a crash.
+  -->
 
 </Project>
