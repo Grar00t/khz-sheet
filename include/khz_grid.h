@@ -35,7 +35,11 @@ typedef struct KhzGridSlot {
    growing would mean a second allocation and a rehash, and the point of a
    single pool is that the high-water mark is decided before the first cell,
    not discovered under load. Exceeding cell_capacity is a counted rejection
-   and KHZ_SHEET_ERR_LIMIT. */
+   and KHZ_SHEET_ERR_LIMIT.
+
+   Cell storage is append-only. An index, once handed out, refers to the same
+   cell for the lifetime of the grid, and cell_count only ever increases. The
+   range-edge machinery below depends on both of those properties. */
 typedef struct KhzGrid {
     KhzArena    *arena;
     KhzGridSlot *slots;
@@ -77,16 +81,56 @@ typedef struct KhzDepEdge {
     struct KhzDepEdge *next;
 } KhzDepEdge;
 
+/* An inclusive rectangle in cell coordinates, held normalised so that
+   col1 <= col2 and row1 <= row2. khz_dep_add_range_edge normalises whatever
+   corner order it is handed, so A3:C1 and C1:A3 describe the same region. */
+typedef struct KhzDepRect {
+    uint32_t col1;
+    uint32_t row1;
+    uint32_t col2;
+    uint32_t row2;
+} KhzDepRect;
+
+/* A dependency on a region rather than on a cell.
+
+   Before Phase 96 a range reference such as SUM(A1:A100) was lowered into one
+   concrete edge per cell that happened to exist at the moment the formula was
+   declared. That froze the range: a cell written into A50 afterwards was
+   inside the region the formula reads, but no edge pointed at the formula, so
+   recalculation never reached it and the sheet reported a stale sum. The bug
+   was silent, which is the worst property a dependency bug can have.
+
+   A range edge instead stores the region itself. `scanned` records how many
+   grid cells have already been examined for this region. Because cell storage
+   is append-only and indices are stable, every cell created after the last
+   sync occupies an index at or above `scanned`, so khz_dep_range_sync only
+   has to walk the tail, and no (region, cell) pair is ever linked twice.
+
+   A cell inside a region that feeds a formula in that same region is a
+   genuine circular reference. The self-edge is recorded exactly like any
+   other, so khz_dep_topo reports KHZ_SHEET_ERR_CYCLE. It is not skipped:
+   skipping it would break the cycle silently and yield a number that looks
+   like an answer. */
+typedef struct KhzDepRangeEdge {
+    KhzDepRect              rect;
+    size_t                  to;      /* dependent cell index */
+    size_t                  scanned; /* grid cells already examined */
+    struct KhzDepRangeEdge *next;
+} KhzDepRangeEdge;
+
 /* Dependency graph over grid cell indices. An edge from A to B means B reads A,
    so A must be evaluated first. Edge nodes are arena allocated and never
    freed individually, like everything else here. */
 typedef struct KhzDepGraph {
-    KhzArena    *arena;
-    KhzGrid     *grid;
-    KhzDepEdge **heads;      /* one list head per cell slot */
-    uint32_t    *indegree;
-    size_t       capacity;
-    uint64_t     edge_count;
+    KhzArena         *arena;
+    KhzGrid          *grid;
+    KhzDepEdge      **heads;      /* one list head per cell slot */
+    uint32_t         *indegree;
+    size_t            capacity;
+    uint64_t          edge_count;
+    KhzDepRangeEdge  *ranges;     /* declared regions, newest first */
+    uint64_t          range_count;
+    uint64_t          range_links; /* concrete edges materialised from regions */
 } KhzDepGraph;
 
 KhzSheetStatus khz_dep_init(KhzDepGraph *graph, KhzArena *arena, KhzGrid *grid);
@@ -98,10 +142,39 @@ KhzSheetStatus khz_dep_add_edge(KhzDepGraph *graph,
                                uint32_t from_col, uint32_t from_row,
                                uint32_t to_col, uint32_t to_row);
 
+/* Declares that the cell at (to_col, to_row) reads every cell in the given
+   rectangle, including cells that do not exist yet.
+
+   The corners may be given in any order. The region is range-checked against
+   the grid ceilings and refused with KHZ_SHEET_ERR_LIMIT if it falls outside
+   them. Cells already present inside the region are linked before the call
+   returns; later ones are linked by khz_dep_range_sync.
+
+   Note that this deliberately does not replace khz_dep_add_edge. A single
+   cell reference is still a single edge, with no region to re-scan. */
+KhzSheetStatus khz_dep_add_range_edge(KhzDepGraph *graph,
+                                     uint32_t col1, uint32_t row1,
+                                     uint32_t col2, uint32_t row2,
+                                     uint32_t to_col, uint32_t to_row);
+
+/* Materialises concrete edges for cells that appeared inside a declared
+   region since the last sync. Idempotent: calling it twice with no cells
+   created in between adds nothing. khz_dep_topo calls it, so ordinary
+   recalculation never has to. Call it directly only when the indegree array
+   is being inspected without a topological sort. */
+KhzSheetStatus khz_dep_range_sync(KhzDepGraph *graph);
+
+/* 1 when the coordinate falls inside the rectangle. */
+int khz_dep_rect_contains(const KhzDepRect *rect, uint32_t col, uint32_t row);
+
 /* Kahn's algorithm over the cells that currently exist. order receives cell
    indices in evaluation order and must hold at least khz_grid_count entries.
    A graph with a cycle returns KHZ_SHEET_ERR_CYCLE and writes nothing: a
    circular reference is reported, never broken at an arbitrary edge.
+
+   Range edges are synced first, so a cell written into a region after the
+   formula that reads it was declared is ordered correctly on this call and
+   not on some later one.
 
    Scratch memory is taken from the arena between a mark and a release, so the
    call leaves the arena offset exactly where it found it. */
@@ -109,6 +182,8 @@ KhzSheetStatus khz_dep_topo(KhzDepGraph *graph, size_t *order, size_t capacity,
                             size_t *count);
 
 uint64_t khz_dep_edge_count(const KhzDepGraph *graph);
+uint64_t khz_dep_range_count(const KhzDepGraph *graph);
+uint64_t khz_dep_range_links(const KhzDepGraph *graph);
 
 #ifdef __cplusplus
 }
