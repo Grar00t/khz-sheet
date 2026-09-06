@@ -8,6 +8,15 @@
 #  define KHZ_SIMD_IMPL_NEON 1
 #endif
 
+/* 64-bit lane comparison is an aarch64 instruction. On 32-bit ARM the NEON
+   unit has no vcgtq_s64, so the selection kernels below stay scalar there even
+   though the sum kernel vectorises. Compiling a comparison that does not exist
+   is not an option, and pretending otherwise would break the build on exactly
+   the targets that need the honesty. */
+#if defined(KHZ_SIMD_IMPL_NEON) && defined(__aarch64__)
+#  define KHZ_SIMD_NEON_CMP64 1
+#endif
+
 #if defined(__GNUC__) || defined(__clang__)
 #  define KHZ_HAS_BUILTIN_OVERFLOW 1
 #endif
@@ -249,4 +258,220 @@ KhzSheetStatus khz_simd_avg_rational(const KhzRational *values, size_t count,
 
     /* Stays a rational: AVERAGE(1,2) is 3/2, not 1.5 and not 1. */
     return khz_rational_div(total, divisor, out);
+}
+
+/* ---------------------------------------------------------------------- *
+ * Selection kernels.
+ *
+ * There is no _mm256_min_epi64 in AVX2 and no vminq_s64 in NEON: 64-bit
+ * integer min/max arrived with AVX-512 and SVE. Both paths therefore compare
+ * and blend, which is two instructions instead of one and still beats the
+ * scalar loop by the lane count. No arithmetic is performed on the values, so
+ * unlike SUM there is nothing here that can overflow.
+ * ---------------------------------------------------------------------- */
+
+KhzSheetStatus khz_simd_min_i64(const int64_t *values, size_t count, int64_t *out)
+{
+    int64_t best;
+    size_t i = (size_t)0;
+
+    if (out == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    /* No identity element exists for MIN, so an empty range is refused rather
+       than answered with zero. */
+    if (count == (size_t)0) {
+        return KHZ_SHEET_ERR_RANGE;
+    }
+
+    if (values == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    best = values[0];
+
+#if defined(KHZ_SIMD_IMPL_AVX2)
+    if (count >= (size_t)4) {
+        __m256i acc = _mm256_loadu_si256((const __m256i *)(const void *)values);
+        int64_t lanes[4];
+        unsigned int lane;
+
+        for (i = (size_t)4; i + (size_t)4 <= count; i += (size_t)4) {
+            __m256i v = _mm256_loadu_si256((const __m256i *)(const void *)(values + i));
+            __m256i gt = _mm256_cmpgt_epi64(acc, v);
+
+            /* Lane mask is all ones where acc > v, so the blend takes v there
+               and keeps acc elsewhere. blendv_epi8 selects per byte, which is
+               correct given a mask that is uniform across each 64-bit lane. */
+            acc = _mm256_blendv_epi8(acc, v, gt);
+        }
+
+        _mm256_storeu_si256((__m256i *)(void *)lanes, acc);
+
+        for (lane = 0u; lane < 4u; ++lane) {
+            if (lanes[lane] < best) {
+                best = lanes[lane];
+            }
+        }
+    }
+#elif defined(KHZ_SIMD_NEON_CMP64)
+    if (count >= (size_t)2) {
+        int64x2_t acc = vld1q_s64(values);
+        int64_t lanes[2];
+        unsigned int lane;
+
+        for (i = (size_t)2; i + (size_t)2 <= count; i += (size_t)2) {
+            int64x2_t v = vld1q_s64(values + i);
+            uint64x2_t gt = vcgtq_s64(acc, v);
+
+            acc = vbslq_s64(gt, v, acc);
+        }
+
+        vst1q_s64(lanes, acc);
+
+        for (lane = 0u; lane < 2u; ++lane) {
+            if (lanes[lane] < best) {
+                best = lanes[lane];
+            }
+        }
+    }
+#endif
+
+    /* Tail, and the whole array on a scalar build or on 32-bit ARM. */
+    for (; i < count; ++i) {
+        if (values[i] < best) {
+            best = values[i];
+        }
+    }
+
+    *out = best;
+    return KHZ_SHEET_OK;
+}
+
+KhzSheetStatus khz_simd_max_i64(const int64_t *values, size_t count, int64_t *out)
+{
+    int64_t best;
+    size_t i = (size_t)0;
+
+    if (out == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    if (count == (size_t)0) {
+        return KHZ_SHEET_ERR_RANGE;
+    }
+
+    if (values == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    best = values[0];
+
+#if defined(KHZ_SIMD_IMPL_AVX2)
+    if (count >= (size_t)4) {
+        __m256i acc = _mm256_loadu_si256((const __m256i *)(const void *)values);
+        int64_t lanes[4];
+        unsigned int lane;
+
+        for (i = (size_t)4; i + (size_t)4 <= count; i += (size_t)4) {
+            __m256i v = _mm256_loadu_si256((const __m256i *)(const void *)(values + i));
+            __m256i gt = _mm256_cmpgt_epi64(v, acc);
+
+            acc = _mm256_blendv_epi8(acc, v, gt);
+        }
+
+        _mm256_storeu_si256((__m256i *)(void *)lanes, acc);
+
+        for (lane = 0u; lane < 4u; ++lane) {
+            if (lanes[lane] > best) {
+                best = lanes[lane];
+            }
+        }
+    }
+#elif defined(KHZ_SIMD_NEON_CMP64)
+    if (count >= (size_t)2) {
+        int64x2_t acc = vld1q_s64(values);
+        int64_t lanes[2];
+        unsigned int lane;
+
+        for (i = (size_t)2; i + (size_t)2 <= count; i += (size_t)2) {
+            int64x2_t v = vld1q_s64(values + i);
+            uint64x2_t gt = vcgtq_s64(v, acc);
+
+            acc = vbslq_s64(gt, v, acc);
+        }
+
+        vst1q_s64(lanes, acc);
+
+        for (lane = 0u; lane < 2u; ++lane) {
+            if (lanes[lane] > best) {
+                best = lanes[lane];
+            }
+        }
+    }
+#endif
+
+    for (; i < count; ++i) {
+        if (values[i] > best) {
+            best = values[i];
+        }
+    }
+
+    *out = best;
+    return KHZ_SHEET_OK;
+}
+
+/* Shared fold for the rational selection kernels. want is -1 for MIN and 1 for
+   MAX: the candidate replaces the incumbent when the comparison matches. */
+static KhzSheetStatus khz_simd_select_rational(const KhzRational *values, size_t count,
+                                               int want, KhzRational *out)
+{
+    KhzRational best;
+    size_t i;
+
+    if (out == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    if (count == (size_t)0) {
+        return KHZ_SHEET_ERR_RANGE;
+    }
+
+    if (values == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    best = values[0];
+
+    for (i = (size_t)1; i < count; ++i) {
+        int cmp = 0;
+        KhzSheetStatus status = khz_rational_compare(values[i], best, &cmp);
+
+        /* An overflowing cross product is propagated, not swallowed. Picking
+           an element on the strength of a comparison that could not be
+           computed would produce a confident wrong answer. */
+        if (status != KHZ_SHEET_OK) {
+            return status;
+        }
+
+        if (cmp == want) {
+            best = values[i];
+        }
+    }
+
+    *out = best;
+    return KHZ_SHEET_OK;
+}
+
+KhzSheetStatus khz_simd_min_rational(const KhzRational *values, size_t count,
+                                     KhzRational *out)
+{
+    return khz_simd_select_rational(values, count, -1, out);
+}
+
+KhzSheetStatus khz_simd_max_rational(const KhzRational *values, size_t count,
+                                     KhzRational *out)
+{
+    return khz_simd_select_rational(values, count, 1, out);
 }
