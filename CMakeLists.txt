@@ -21,6 +21,11 @@ option(KHZ_BUILD_SHARED "Build the shared library used by the C# bindings" ON)
 # Sources are listed, not globbed. A glob would silently pick up any stray .c
 # file left in the tree and produce duplicate symbols; an explicit list fails
 # loudly instead, which is the behaviour worth having.
+#
+# khz_formula.c and khz_formula_eval.c are one module in two translation units:
+# the first holds the IR builder and the parser, the second the evaluator,
+# dependency declaration and recalculation. Both are required - omitting the
+# second leaves khz_formula_eval and khz_formula_recalc undefined at link.
 set(KHZ_SOURCES
     src/khz_arena.c
     src/khz_hash.c
@@ -29,6 +34,8 @@ set(KHZ_SOURCES
     src/khz_grid.c
     src/khz_simd.c
     src/khz_sheet.c
+    src/khz_formula.c
+    src/khz_formula_eval.c
     src/khz_xlsx.c
     src/khz_ledger.c
     src/khz_abi.c
