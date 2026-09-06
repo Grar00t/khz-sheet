@@ -29,6 +29,7 @@ set(KHZ_SOURCES
     src/khz_grid.c
     src/khz_simd.c
     src/khz_sheet.c
+    src/khz_xlsx.c
     src/khz_ledger.c
     src/khz_abi.c
 )
@@ -124,11 +125,12 @@ if(KHZ_BUILD_SELFTEST)
 "int main(void)\n"
 "{\n"
 "    int failures = khz_sheet_selftest();\n"
-"    printf(\"abi=%u kernel=%s lanes=%zu ledger=%d failures=%d\\n\",\n"
+"    printf(\"abi=%u kernel=%s lanes=%zu ledger=%d xlsx=%d failures=%d\\n\",\n"
 "           khz_abi_version(),\n"
 "           khz_simd_kernel_name(khz_simd_kernel()),\n"
 "           khz_simd_lanes(),\n"
 "           khz_ledger_available(),\n"
+"           khz_abi_xlsx_compiled(),\n"
 "           failures);\n"
 "    return failures == 0 ? 0 : 1;\n"
 "}\n")
