@@ -360,7 +360,7 @@ int khz_dep_rect_contains(const KhzDepRect *rect, uint32_t col, uint32_t row)
 static KhzSheetStatus khz_dep_range_scan(KhzDepGraph *graph,
                                          KhzDepRangeEdge *range)
 {
-    const KhzGrid *grid = graph->grid;
+    KhzGrid *grid = graph->grid;
     size_t i;
 
     for (i = range->scanned; i < grid->cell_count; ++i) {
@@ -378,6 +378,27 @@ static KhzSheetStatus khz_dep_range_scan(KhzDepGraph *graph,
                    skipped forever. */
                 range->scanned = i;
                 return status;
+            }
+
+            /* The dependent is marked dirty here, at the moment the link is
+               created, and this is not redundant with the dirty propagation
+               in khz_formula_deps.c.
+
+               That propagation walks graph->heads, so it can only see links
+               that already exist. A value written into a declared region
+               before the next sync has no edge pointing at the formula yet,
+               so it dirties nothing. Recalculation would then sync the link,
+               order the formula correctly - and skip it, because the flag was
+               never set. The result would be a stale value produced by a
+               correctly ordered graph, which is worse than the frozen-range
+               bug this phase set out to remove, because the ordering would
+               look right.
+
+               So the appearance of a new edge is itself treated as a reason
+               to recompute the dependent. */
+            if (range->to < grid->cell_count &&
+                grid->cells[range->to].kind == (uint32_t)KHZ_CELL_FORMULA) {
+                grid->cells[range->to].flags |= (uint32_t)KHZ_CELL_FLAG_DIRTY;
             }
 
             graph->range_links += (uint64_t)1;
