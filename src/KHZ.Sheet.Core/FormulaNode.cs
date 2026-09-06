@@ -27,15 +27,74 @@ namespace KHZ.Sheet.Core
 		public abstract FormulaNodeKind Kind { get; }
 	}
 
-	/// <summary>A numeric literal.</summary>
+	/// <summary>
+	/// A numeric literal.
+	///
+	/// Value is a double, and that is the defect this class is being prepared
+	/// to fix. The C core stores an exact int64 rational, so 0.1 must reach it
+	/// as 1/10 - but a double cannot hold 0.1, and by the time the literal has
+	/// been through double the exact value the user typed is gone. Recovering
+	/// it afterwards is guesswork: KhzFormula.cs currently routes the double
+	/// through decimal to undo the rounding, which repairs the common cases and
+	/// cannot be correct in general, because it is reconstructing information
+	/// that was already destroyed.
+	///
+	/// RawText is the fix: the digits exactly as written, so the lowerer can
+	/// build num/den from the text and never consult the double at all. This
+	/// phase only carries the text; nothing reads it yet.
+	///
+	/// Additive on purpose. The one-argument constructor is unchanged and
+	/// FormulaParser.cs is untouched, so every existing call site still
+	/// compiles and still produces a node whose RawText is null.
+	/// </summary>
 	public sealed class NumberNode : FormulaNode
 	{
+		/// <summary>
+		/// The pre-Phase-96 form. Kept so the existing parser compiles
+		/// unchanged. A node built this way has no exact text and HasRawText is
+		/// false - which is the honest report, not a defect to be hidden.
+		/// </summary>
 		public NumberNode(double value)
 		{
 			Value = value;
+			RawText = null;
 		}
 
+		/// <summary>
+		/// Carries the literal as written alongside the double.
+		///
+		/// rawText is not validated or normalised here. It is the source text,
+		/// and a parser that trimmed or reformatted it would reintroduce exactly
+		/// the loss this constructor exists to avoid. An empty or whitespace
+		/// string is treated as absent rather than stored, because it could not
+		/// be parsed back into a number.
+		/// </summary>
+		public NumberNode(double value, string rawText)
+		{
+			Value = value;
+			RawText = string.IsNullOrWhiteSpace(rawText) ? null : rawText;
+		}
+
+		/// <summary>
+		/// The literal as a double. Lossy for any value not representable in
+		/// binary floating point; prefer RawText when it is present.
+		/// </summary>
 		public double Value { get; }
+
+		/// <summary>
+		/// The literal exactly as it appeared in the formula, or null when this
+		/// node was built without it.
+		/// </summary>
+		public string RawText { get; }
+
+		/// <summary>
+		/// True when the exact text is available, so a caller can convert to an
+		/// exact rational instead of reconstructing one from the double.
+		/// </summary>
+		public bool HasRawText
+		{
+			get { return RawText != null; }
+		}
 
 		public override FormulaNodeKind Kind
 		{
