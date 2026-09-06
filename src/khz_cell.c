@@ -138,4 +138,187 @@ KhzSheetStatus khz_cell_set_error(KhzCell *cell, KhzCellError error)
 KhzSheetStatus khz_cell_set_formula(KhzCell *cell, const char *formula, uint32_t len)
 {
     if (cell == NULL) {
-        return KHZ_SH
+        return KHZ_SHEET_ERR_NULL;
+    }
+    if (formula == NULL && len != 0u) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    khz_cell_clear_payload(cell);
+    cell->kind = (uint32_t)KHZ_CELL_FORMULA;
+    cell->formula = formula;
+    cell->formula_len = len;
+
+    /* A formula with no computed value is behind by definition. The flag says
+       so rather than letting a zero look like a result. */
+    cell->flags |= KHZ_CELL_FLAG_DIRTY;
+    return KHZ_SHEET_OK;
+}
+
+KhzSheetStatus khz_cell_digest(const KhzCell *cell,
+                               const unsigned char prev[KHZ_SHA256_DIGEST_BYTES],
+                               unsigned char out[KHZ_SHA256_DIGEST_BYTES])
+{
+    KhzSha256 ctx;
+    KhzHashStatus hash;
+    unsigned char header[64];
+    size_t at = (size_t)0;
+
+    if (cell == NULL || prev == NULL || out == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    /* Fixed-width fields first, lengths before the variable-length tails. Two
+       distinct cells cannot share a pre-image: the lengths make the
+       concatenation unambiguous. */
+    khz_store_le32(header + at, cell->col);            at += 4u;
+    khz_store_le32(header + at, cell->row);            at += 4u;
+    khz_store_le32(header + at, cell->kind);           at += 4u;
+    khz_store_le32(header + at, cell->error);          at += 4u;
+    khz_store_le64(header + at, (uint64_t)cell->value.num); at += 8u;
+    khz_store_le64(header + at, (uint64_t)cell->value.den); at += 8u;
+    khz_store_le32(header + at, cell->text_len);       at += 4u;
+    khz_store_le32(header + at, cell->formula_len);    at += 4u;
+    khz_store_le32(header + at, cell->bool_value);     at += 4u;
+    khz_store_le32(header + at, cell->flags);          at += 4u;
+    khz_store_le64(header + at, cell->revision);       at += 8u;
+
+    hash = khz_sha256_init(&ctx);
+    if (hash != KHZ_HASH_OK) {
+        return KHZ_SHEET_ERR_STATE;
+    }
+
+    if (khz_sha256_update(&ctx, prev, (size_t)KHZ_SHA256_DIGEST_BYTES) != KHZ_HASH_OK) {
+        return KHZ_SHEET_ERR_STATE;
+    }
+    if (khz_sha256_update(&ctx, KHZ_CELL_PROOF_TAG, KHZ_CELL_PROOF_TAG_BYTES) != KHZ_HASH_OK) {
+        return KHZ_SHEET_ERR_STATE;
+    }
+    if (khz_sha256_update(&ctx, header, at) != KHZ_HASH_OK) {
+        return KHZ_SHEET_ERR_STATE;
+    }
+
+    if (cell->text_len != 0u) {
+        if (cell->text == NULL) {
+            return KHZ_SHEET_ERR_STATE;
+        }
+        if (khz_sha256_update(&ctx, cell->text, (size_t)cell->text_len) != KHZ_HASH_OK) {
+            return KHZ_SHEET_ERR_STATE;
+        }
+    }
+
+    if (cell->formula_len != 0u) {
+        if (cell->formula == NULL) {
+            return KHZ_SHEET_ERR_STATE;
+        }
+        if (khz_sha256_update(&ctx, cell->formula, (size_t)cell->formula_len) != KHZ_HASH_OK) {
+            return KHZ_SHEET_ERR_STATE;
+        }
+    }
+
+    if (khz_sha256_final(&ctx, out) != KHZ_HASH_OK) {
+        return KHZ_SHEET_ERR_STATE;
+    }
+
+    return KHZ_SHEET_OK;
+}
+
+KhzSheetStatus khz_cell_commit(KhzCell *cell,
+                               const unsigned char prev[KHZ_SHA256_DIGEST_BYTES])
+{
+    unsigned char digest[KHZ_SHA256_DIGEST_BYTES];
+    KhzSheetStatus status;
+
+    if (cell == NULL || prev == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    if (cell->revision == UINT64_MAX) {
+        return KHZ_SHEET_ERR_OVERFLOW;
+    }
+
+    cell->revision += (uint64_t)1;
+
+    status = khz_cell_digest(cell, prev, digest);
+    if (status != KHZ_SHEET_OK) {
+        /* Put the revision back. A failed commit must leave no trace, or the
+           next successful one would chain onto a state that never existed. */
+        cell->revision -= (uint64_t)1;
+        return status;
+    }
+
+    memcpy(cell->proof, digest, sizeof digest);
+    return KHZ_SHEET_OK;
+}
+
+KhzSheetStatus khz_cell_verify(const KhzCell *cell,
+                               const unsigned char prev[KHZ_SHA256_DIGEST_BYTES])
+{
+    unsigned char digest[KHZ_SHA256_DIGEST_BYTES];
+    KhzSheetStatus status;
+
+    if (cell == NULL || prev == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    if (cell->revision == (uint64_t)0) {
+        /* Never committed. There is nothing to verify, and saying "OK" would
+           be a claim about a proof that was never made. */
+        return KHZ_SHEET_ERR_STATE;
+    }
+
+    status = khz_cell_digest(cell, prev, digest);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    if (khz_hash_equal_ct(digest, cell->proof, (size_t)KHZ_SHA256_DIGEST_BYTES) == 0) {
+        return KHZ_SHEET_ERR_FORMAT;
+    }
+
+    return KHZ_SHEET_OK;
+}
+
+const char *khz_cell_kind_name(KhzCellKind kind)
+{
+    switch (kind) {
+        case KHZ_CELL_EMPTY:
+            return "EMPTY";
+        case KHZ_CELL_RATIONAL:
+            return "RATIONAL";
+        case KHZ_CELL_TEXT:
+            return "TEXT";
+        case KHZ_CELL_BOOL:
+            return "BOOL";
+        case KHZ_CELL_ERROR:
+            return "ERROR";
+        case KHZ_CELL_FORMULA:
+            return "FORMULA";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+const char *khz_cell_error_name(KhzCellError error)
+{
+    switch (error) {
+        case KHZ_CELL_ERROR_NONE:
+            return "";
+        case KHZ_CELL_ERROR_NULL:
+            return "#NULL!";
+        case KHZ_CELL_ERROR_DIV0:
+            return "#DIV/0!";
+        case KHZ_CELL_ERROR_VALUE:
+            return "#VALUE!";
+        case KHZ_CELL_ERROR_REF:
+            return "#REF!";
+        case KHZ_CELL_ERROR_NAME:
+            return "#NAME?";
+        case KHZ_CELL_ERROR_NUM:
+            return "#NUM!";
+        case KHZ_CELL_ERROR_NA:
+            return "#N/A";
+        default:
+            return "#UNKNOWN";
+    }
+}
