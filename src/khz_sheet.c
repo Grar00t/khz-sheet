@@ -36,10 +36,28 @@ const char *khz_sheet_status_name(KhzSheetStatus status)
     }
 }
 
+/* The log is sized from the cell capacity and clamped. A sheet built with a
+   1 MB arena and 1024 cells must not have a 3 MB commit log: the log is
+   bookkeeping and the arena was sized for data. */
+static size_t khz_sheet_log_size(size_t cell_capacity)
+{
+    size_t want = cell_capacity;
+
+    if (want < KHZ_SHEET_COMMIT_LOG_MIN) {
+        want = KHZ_SHEET_COMMIT_LOG_MIN;
+    }
+    if (want > KHZ_SHEET_COMMIT_LOG_MAX) {
+        want = KHZ_SHEET_COMMIT_LOG_MAX;
+    }
+
+    return want;
+}
+
 KhzSheetStatus khz_sheet_init(KhzSheet *sheet, size_t arena_bytes, size_t cell_capacity)
 {
     KhzArenaStatus arena_status;
     KhzSheetStatus status;
+    size_t log_entries;
 
     if (sheet == NULL) {
         return KHZ_SHEET_ERR_NULL;
@@ -65,6 +83,25 @@ KhzSheetStatus khz_sheet_init(KhzSheet *sheet, size_t arena_bytes, size_t cell_c
         return status;
     }
 
+    log_entries = khz_sheet_log_size(cell_capacity);
+
+    sheet->log.entries = (KhzCommitEntry *)khz_arena_alloc_zeroed(
+        &sheet->arena, log_entries * sizeof(KhzCommitEntry));
+
+    if (sheet->log.entries == NULL) {
+        /* Without the log there is no way to verify the chain after a
+           rewrite, and a sheet that cannot be verified is not a sheet this
+           layer is willing to hand back. */
+        khz_arena_destroy(&sheet->arena);
+        return KHZ_SHEET_ERR_MEMORY;
+    }
+
+    sheet->log.capacity = log_entries;
+    sheet->log.next = (size_t)0;
+    sheet->log.recorded = (uint64_t)0;
+    sheet->log.dropped = (uint64_t)0;
+    memset(sheet->log.base, 0, sizeof sheet->log.base);
+
     /* Genesis link is 32 zero bytes. The first cell commit chains onto it, so
        the chain has a defined start rather than an implicit one. */
     memset(sheet->proof, 0, sizeof sheet->proof);
@@ -85,8 +122,9 @@ void khz_sheet_destroy(KhzSheet *sheet)
         return;
     }
 
-    /* One call returns everything: slots, cells, edge nodes and copied text
-       all came out of this arena and none of them were allocated separately. */
+    /* One call returns everything: slots, cells, edge nodes, the commit log
+       and copied text all came out of this arena and none of them were
+       allocated separately. */
     khz_arena_destroy(&sheet->arena);
     memset(sheet, 0, sizeof *sheet);
 }
@@ -104,6 +142,21 @@ size_t khz_sheet_cell_count(const KhzSheet *sheet)
 uint64_t khz_sheet_commits(const KhzSheet *sheet)
 {
     return sheet == NULL ? (uint64_t)0 : sheet->commits;
+}
+
+size_t khz_sheet_log_capacity(const KhzSheet *sheet)
+{
+    return sheet == NULL ? (size_t)0 : sheet->log.capacity;
+}
+
+uint64_t khz_sheet_log_recorded(const KhzSheet *sheet)
+{
+    return sheet == NULL ? (uint64_t)0 : sheet->log.recorded;
+}
+
+uint64_t khz_sheet_log_dropped(const KhzSheet *sheet)
+{
+    return sheet == NULL ? (uint64_t)0 : sheet->log.dropped;
 }
 
 size_t khz_sheet_mark(const KhzSheet *sheet)
@@ -130,8 +183,48 @@ KhzSheetStatus khz_sheet_release(KhzSheet *sheet, size_t mark)
     return status == KHZ_ARENA_OK ? KHZ_SHEET_OK : KHZ_SHEET_ERR_STATE;
 }
 
-/* Commits the cell onto the chain head and advances the head. On failure the
-   head is untouched, so a rejected write leaves no gap in the chain. */
+/* Records one commit event. Called only after the cell's proof has been
+   written, so the entry stores the head as it now stands. */
+static KhzSheetStatus khz_sheet_log_append(KhzSheet *sheet, const KhzCell *cell)
+{
+    KhzCommitLog *log = &sheet->log;
+    KhzCommitEntry *slot;
+
+    if (log->entries == NULL || log->capacity == (size_t)0) {
+        return KHZ_SHEET_ERR_STATE;
+    }
+
+    slot = &log->entries[log->next];
+
+    /* The ring is full, so this write evicts the oldest retained entry. Its
+       head becomes the base the audit starts from, which keeps the retained
+       window a self-contained chain rather than one with a missing first
+       link. */
+    if (log->recorded >= (uint64_t)log->capacity) {
+        memcpy(log->base, slot->head, sizeof log->base);
+
+        if (log->dropped != UINT64_MAX) {
+            log->dropped += (uint64_t)1;
+        }
+    }
+
+    slot->key = khz_cell_key(cell->col, cell->row);
+    slot->revision = cell->revision;
+    memcpy(slot->head, cell->proof, KHZ_CELL_PROOF_BYTES);
+
+    log->next = (log->next + (size_t)1) % log->capacity;
+
+    if (log->recorded == UINT64_MAX) {
+        return KHZ_SHEET_ERR_OVERFLOW;
+    }
+
+    log->recorded += (uint64_t)1;
+    return KHZ_SHEET_OK;
+}
+
+/* Commits the cell onto the chain head, advances the head and records the
+   event. On failure the head is untouched, so a rejected write leaves no gap
+   in the chain. */
 static KhzSheetStatus khz_sheet_commit_cell(KhzSheet *sheet, KhzCell *cell)
 {
     KhzSheetStatus status = khz_cell_commit(cell, sheet->proof);
@@ -147,7 +240,8 @@ static KhzSheetStatus khz_sheet_commit_cell(KhzSheet *sheet, KhzCell *cell)
     }
 
     sheet->commits += (uint64_t)1;
-    return KHZ_SHEET_OK;
+
+    return khz_sheet_log_append(sheet, cell);
 }
 
 static KhzSheetStatus khz_sheet_ready(const KhzSheet *sheet)
@@ -159,6 +253,20 @@ static KhzSheetStatus khz_sheet_ready(const KhzSheet *sheet)
         return KHZ_SHEET_ERR_STATE;
     }
     return KHZ_SHEET_OK;
+}
+
+KhzSheetStatus khz_sheet_commit_in_place(KhzSheet *sheet, KhzCell *cell)
+{
+    KhzSheetStatus status = khz_sheet_ready(sheet);
+
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+    if (cell == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    return khz_sheet_commit_cell(sheet, cell);
 }
 
 /* Copies the bytes into the arena so the cell never points at caller memory
@@ -327,6 +435,9 @@ KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row
         return status;
     }
 
+    /* A new formula has no computed value yet, so it is dirty from birth. */
+    cell->flags |= (uint32_t)KHZ_CELL_FLAG_DIRTY;
+
     return khz_sheet_commit_cell(sheet, cell);
 }
 
@@ -354,6 +465,23 @@ KhzSheetStatus khz_sheet_get(const KhzSheet *sheet, uint32_t col, uint32_t row,
     return KHZ_SHEET_OK;
 }
 
+KhzSheetStatus khz_sheet_get_mutable(KhzSheet *sheet, uint32_t col, uint32_t row,
+                                     KhzCell **cell)
+{
+    KhzSheetStatus status;
+
+    if (cell == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    status = khz_sheet_ready(sheet);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    return khz_grid_find(&sheet->grid, col, row, NULL, cell);
+}
+
 KhzSheetStatus khz_sheet_declare_dependency(KhzSheet *sheet,
                                             uint32_t from_col, uint32_t from_row,
                                             uint32_t to_col, uint32_t to_row)
@@ -377,6 +505,109 @@ KhzSheetStatus khz_sheet_evaluation_order(KhzSheet *sheet, size_t *order,
     }
 
     return khz_dep_topo(&sheet->deps, order, capacity, count);
+}
+
+/* Breadth-first walk of the dependents of one cell.
+
+   An edge from A to B means B reads A, so the heads list at A is exactly the
+   set of cells that must be recomputed when A changes. Only formula cells are
+   marked: a value cell has nothing to recompute, and flagging it would make
+   the dirty count a measure of graph reach rather than of pending work. */
+KhzSheetStatus khz_sheet_mark_dirty(KhzSheet *sheet, uint32_t col, uint32_t row,
+                                    uint64_t *marked)
+{
+    size_t origin = (size_t)0;
+    size_t total;
+    size_t mark;
+    size_t head = (size_t)0;
+    size_t tail = (size_t)0;
+    size_t *queue;
+    unsigned char *seen;
+    uint64_t count = (uint64_t)0;
+    KhzSheetStatus status = khz_sheet_ready(sheet);
+
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    status = khz_grid_find(&sheet->grid, col, row, &origin, NULL);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    total = khz_grid_count(&sheet->grid);
+    if (total == (size_t)0) {
+        if (marked != NULL) {
+            *marked = (uint64_t)0;
+        }
+        return KHZ_SHEET_OK;
+    }
+
+    mark = khz_arena_mark(&sheet->arena);
+
+    queue = (size_t *)khz_arena_alloc(&sheet->arena, total * sizeof(size_t));
+    seen = (unsigned char *)khz_arena_alloc_zeroed(&sheet->arena, total);
+
+    if (queue == NULL || seen == NULL) {
+        (void)khz_arena_release(&sheet->arena, mark);
+        return KHZ_SHEET_ERR_MEMORY;
+    }
+
+    queue[tail++] = origin;
+    seen[origin] = (unsigned char)1;
+
+    while (head < tail) {
+        size_t at = queue[head++];
+        KhzCell *cell = &sheet->grid.cells[at];
+        const KhzDepEdge *edge;
+
+        if (cell->kind == (uint32_t)KHZ_CELL_FORMULA) {
+            cell->flags |= (uint32_t)KHZ_CELL_FLAG_DIRTY;
+            ++count;
+        }
+
+        if (sheet->deps.heads == NULL || at >= sheet->deps.capacity) {
+            continue;
+        }
+
+        for (edge = sheet->deps.heads[at]; edge != NULL; edge = edge->next) {
+            if (edge->to >= total || seen[edge->to] != (unsigned char)0) {
+                continue;
+            }
+
+            seen[edge->to] = (unsigned char)1;
+            queue[tail++] = edge->to;
+        }
+    }
+
+    (void)khz_arena_release(&sheet->arena, mark);
+
+    if (marked != NULL) {
+        *marked = count;
+    }
+
+    return KHZ_SHEET_OK;
+}
+
+size_t khz_sheet_dirty_count(const KhzSheet *sheet)
+{
+    size_t total;
+    size_t dirty = (size_t)0;
+    size_t i;
+
+    if (sheet == NULL || sheet->initialised == 0) {
+        return (size_t)0;
+    }
+
+    total = khz_grid_count(&sheet->grid);
+
+    for (i = (size_t)0; i < total; ++i) {
+        if ((sheet->grid.cells[i].flags & (uint32_t)KHZ_CELL_FLAG_DIRTY) != 0u) {
+            ++dirty;
+        }
+    }
+
+    return dirty;
 }
 
 static int khz_sheet_in_range(const KhzCell *cell,
@@ -569,53 +800,128 @@ KhzSheetStatus khz_sheet_avg(KhzSheet *sheet,
     return KHZ_SHEET_OK;
 }
 
-KhzSheetStatus khz_sheet_verify_chain(const KhzSheet *sheet, size_t *failed_index)
+KhzSheetStatus khz_sheet_audit_chain(const KhzSheet *sheet, KhzChainAudit *audit)
 {
     unsigned char link[KHZ_SHA256_DIGEST_BYTES];
-    size_t total;
+    const KhzCommitLog *log;
+    size_t retained;
+    size_t start;
     size_t i;
+    KhzChainAudit local;
     KhzSheetStatus status = khz_sheet_ready(sheet);
 
     if (status != KHZ_SHEET_OK) {
         return status;
     }
 
-    /* Replays insertion order. That is the true commit order only while every
-       cell was written exactly once; a cell rewritten after a later cell was
-       inserted committed out of insertion order, and this check will report a
-       mismatch even though nothing was tampered with. Verifying an
-       arbitrarily rewritten sheet needs the commit event log, which is the
-       SQLite ledger in Phase 91. This function is honest about what it can
-       prove and does not pretend to cover that case. */
-    memset(link, 0, sizeof link);
-    total = khz_grid_count(&sheet->grid);
+    log = &sheet->log;
 
-    for (i = (size_t)0; i < total; ++i) {
-        const KhzCell *cell = &sheet->grid.cells[i];
+    if (log->entries == NULL) {
+        return KHZ_SHEET_ERR_STATE;
+    }
 
-        if (cell->revision != (uint64_t)1) {
-            if (failed_index != NULL) {
-                *failed_index = i;
-            }
-            return KHZ_SHEET_ERR_UNSUPPORTED;
-        }
+    memset(&local, 0, sizeof local);
+    local.dropped = log->dropped;
 
-        status = khz_cell_verify(cell, link);
+    /* The walk starts from the head as it stood before the oldest retained
+       entry. With nothing evicted that is the genesis value, 32 zero bytes. */
+    memcpy(link, log->base, sizeof link);
+
+    retained = log->recorded < (uint64_t)log->capacity
+        ? (size_t)log->recorded
+        : log->capacity;
+
+    /* When the ring has wrapped, next points at the oldest retained entry. */
+    start = log->recorded <= (uint64_t)log->capacity ? (size_t)0 : log->next;
+
+    for (i = (size_t)0; i < retained; ++i) {
+        const KhzCommitEntry *entry = &log->entries[(start + i) % log->capacity];
+        KhzCell *cell = NULL;
+        uint32_t col = 0u;
+        uint32_t row = 0u;
+
+        ++local.entries_examined;
+
+        status = khz_cell_key_split(entry->key, &col, &row);
         if (status != KHZ_SHEET_OK) {
-            if (failed_index != NULL) {
-                *failed_index = i;
+            local.failed_entry = i;
+            if (audit != NULL) {
+                *audit = local;
             }
             return status;
         }
 
-        memcpy(link, cell->proof, sizeof link);
+        status = khz_grid_find(&sheet->grid, col, row, NULL, &cell);
+        if (status != KHZ_SHEET_OK) {
+            /* A commit was recorded for a coordinate that holds no cell. The
+               log and the grid disagree, which is a state error, not a
+               tampering finding. */
+            local.failed_entry = i;
+            if (audit != NULL) {
+                *audit = local;
+            }
+            return KHZ_SHEET_ERR_STATE;
+        }
+
+        if (cell->revision == entry->revision) {
+            /* This entry is the cell's current state, so the digest can be
+               recomputed and must match both the link it chained onto and the
+               head recorded at the time. */
+            status = khz_cell_verify(cell, link);
+            if (status != KHZ_SHEET_OK) {
+                local.failed_entry = i;
+                if (audit != NULL) {
+                    *audit = local;
+                }
+                return status;
+            }
+
+            if (khz_hash_equal_ct(cell->proof, entry->head, KHZ_CELL_PROOF_BYTES) == 0) {
+                local.failed_entry = i;
+                if (audit != NULL) {
+                    *audit = local;
+                }
+                return KHZ_SHEET_ERR_FORMAT;
+            }
+
+            ++local.cells_verified;
+        } else {
+            /* The cell has been written again since. Its former payload exists
+               nowhere in memory, so the digest cannot be recomputed and this
+               link is taken on the log's word. Counted, not hidden: an audit
+               with a non-zero superseded count is a weaker statement than one
+               without. */
+            ++local.superseded;
+        }
+
+        memcpy(link, entry->head, sizeof link);
     }
 
     if (khz_hash_equal_ct(link, sheet->proof, sizeof link) == 0) {
+        local.failed_entry = retained;
+        if (audit != NULL) {
+            *audit = local;
+        }
         return KHZ_SHEET_ERR_FORMAT;
     }
 
+    if (audit != NULL) {
+        *audit = local;
+    }
+
     return KHZ_SHEET_OK;
+}
+
+KhzSheetStatus khz_sheet_verify_chain(const KhzSheet *sheet, size_t *failed_index)
+{
+    KhzChainAudit audit;
+    KhzSheetStatus status = khz_sheet_audit_chain(sheet, &audit);
+
+    if (status != KHZ_SHEET_OK && failed_index != NULL) {
+        *failed_index = audit.failed_entry;
+    }
+
+    return status;
 }
 
 KhzSheetStatus khz_sheet_proof_hex(const KhzSheet *sheet, char out[KHZ_SHA256_HEX_BYTES])
@@ -717,8 +1023,34 @@ int khz_sheet_selftest(void)
         }
     }
 
-    /* End to end: a small sheet, an exact mean, a proof chain that verifies,
-       and an arena that took every byte. */
+    /* MIN and MAX select, and refuse an empty input rather than inventing a
+       zero for it. */
+    {
+        int64_t values[5];
+        int64_t low = (int64_t)0;
+        int64_t high = (int64_t)0;
+
+        values[0] = (int64_t)7;
+        values[1] = (int64_t)-3;
+        values[2] = (int64_t)0;
+        values[3] = INT64_MIN;
+        values[4] = INT64_MAX;
+
+        if (khz_simd_min_i64(values, (size_t)5, &low) != KHZ_SHEET_OK
+            || low != INT64_MIN) {
+            ++failures;
+        }
+        if (khz_simd_max_i64(values, (size_t)5, &high) != KHZ_SHEET_OK
+            || high != INT64_MAX) {
+            ++failures;
+        }
+        if (khz_simd_min_i64(values, (size_t)0, &low) != KHZ_SHEET_ERR_RANGE) {
+            ++failures;
+        }
+    }
+
+    /* End to end: a small sheet, an exact mean, a proof chain that verifies
+       across a rewrite, and an arena that took every byte. */
     {
         KhzSheet sheet;
 
@@ -756,9 +1088,80 @@ int khz_sheet_selftest(void)
                 ++local;
             }
 
+            /* The Phase 94 regression: rewriting a cell that is not the most
+               recently inserted one used to make the chain unverifiable,
+               because the old check replayed insertion order and demanded
+               revision 1. Replaying the commit log must accept it. */
+            {
+                KhzChainAudit audit;
+
+                if (khz_sheet_set_i64(&sheet, 0u, 0u, (int64_t)5) != KHZ_SHEET_OK) {
+                    ++local;
+                }
+                if (khz_sheet_audit_chain(&sheet, &audit) != KHZ_SHEET_OK) {
+                    ++local;
+                }
+                /* One entry is now superseded: the first write to A1. */
+                if (audit.superseded != (uint64_t)1) {
+                    ++local;
+                }
+                if (audit.entries_examined != khz_sheet_log_recorded(&sheet)) {
+                    ++local;
+                }
+                if (khz_sheet_log_dropped(&sheet) != (uint64_t)0) {
+                    ++local;
+                }
+            }
+
+            /* Tampering must still be caught. Editing a cell without
+               committing leaves its proof stale, and the audit must say so. */
+            {
+                KhzCell *cell = NULL;
+
+                if (khz_sheet_get_mutable(&sheet, 0u, 1u, &cell) != KHZ_SHEET_OK
+                    || cell == NULL) {
+                    ++local;
+                } else {
+                    KhzRational saved = cell->value;
+
+                    cell->value.num += (int64_t)1;
+
+                    if (khz_sheet_verify_chain(&sheet, NULL) == KHZ_SHEET_OK) {
+                        ++local;
+                    }
+
+                    cell->value = saved;
+
+                    if (khz_sheet_verify_chain(&sheet, NULL) != KHZ_SHEET_OK) {
+                        ++local;
+                    }
+                }
+            }
+
+            /* Dirty marking follows the graph and touches formula cells only. */
+            {
+                uint64_t dirtied = (uint64_t)0;
+
+                if (khz_sheet_set_formula(&sheet, 1u, 5u, "=A1+A2", (size_t)6)
+                    != KHZ_SHEET_OK) {
+                    ++local;
+                }
+                if (khz_sheet_declare_dependency(&sheet, 0u, 0u, 1u, 5u)
+                    != KHZ_SHEET_OK) {
+                    ++local;
+                }
+                if (khz_sheet_mark_dirty(&sheet, 0u, 0u, &dirtied) != KHZ_SHEET_OK
+                    || dirtied != (uint64_t)1) {
+                    ++local;
+                }
+                if (khz_sheet_dirty_count(&sheet) != (size_t)1) {
+                    ++local;
+                }
+            }
+
             /* A cycle must be reported, not silently ordered. */
-            if (khz_sheet_declare_dependency(&sheet, 1u, 0u, 1u, 1u) != KHZ_SHEET_OK
-                || khz_sheet_declare_dependency(&sheet, 1u, 1u, 1u, 0u) != KHZ_SHEET_OK) {
+            if (khz_sheet_declare_dependency(&sheet, 2u, 0u, 2u, 1u) != KHZ_SHEET_OK
+                || khz_sheet_declare_dependency(&sheet, 2u, 1u, 2u, 0u) != KHZ_SHEET_OK) {
                 ++local;
             } else {
                 size_t order[64];
