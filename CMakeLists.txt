@@ -22,12 +22,18 @@ option(KHZ_BUILD_SHARED "Build the shared library used by the C# bindings" ON)
 # file left in the tree and produce duplicate symbols; an explicit list fails
 # loudly instead, which is the behaviour worth having.
 #
-# Two modules are split across two translation units each, and in both cases
-# both halves are required or the link fails:
+# Two modules are split across multiple translation units, and in both cases
+# every half is required or the link fails:
 #   khz_formula.c        IR builder and parser
-#   khz_formula_eval.c   evaluator, dependency declaration, recalculation
+#   khz_formula_eval.c   evaluator: a tree to a value
+#   khz_formula_deps.c   dependency declaration, setting, recalculation
 #   khz_xlsx_reader.c        zip layer: central directory, CRC-32
 #   khz_xlsx_reader_parse.c  XML layer: shared strings, worksheet to grid
+#
+# khz_formula_deps.c was split out of khz_formula_eval.c in Phase 96. Omitting
+# it does not produce a warning, it produces undefined references to
+# khz_formula_set, khz_formula_declare_dependencies and khz_formula_recalc,
+# all three of which the selftest calls.
 set(KHZ_SOURCES
     src/khz_arena.c
     src/khz_hash.c
@@ -38,6 +44,7 @@ set(KHZ_SOURCES
     src/khz_sheet.c
     src/khz_formula.c
     src/khz_formula_eval.c
+    src/khz_formula_deps.c
     src/khz_xlsx.c
     src/khz_xlsx_reader.c
     src/khz_xlsx_reader_parse.c
@@ -129,9 +136,11 @@ endif()
 
 # khz_simd.h is included here deliberately. This generated file calls
 # khz_simd_kernel, khz_simd_kernel_name and khz_simd_lanes, and until Phase 95
-# it included only khz_abi.h, khz_ledger.h and khz_sheet.h - three implicit
-# declarations, which C11 does not allow. It had never been compiled, so
-# nothing had reported it.
+# it included only khz_abi.h, khz_ledger.h and khz_sheet.h. Those three
+# declarations arrived only transitively, through khz_sheet.h, so the file was
+# not strictly ill-formed - but it had never been compiled either way, and
+# depending on a transitive include for a direct call is not a property worth
+# relying on.
 if(KHZ_BUILD_SELFTEST)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/khz_selftest_main.c"
 "#include <stdio.h>\n"
@@ -142,13 +151,14 @@ if(KHZ_BUILD_SELFTEST)
 "int main(void)\n"
 "{\n"
 "    int failures = khz_sheet_selftest();\n"
-"    printf(\"abi=%u kernel=%s lanes=%zu ledger=%d xlsx=%d reader=%d failures=%d\\n\",\n"
+"    printf(\"abi=%u kernel=%s lanes=%zu ledger=%d xlsx=%d reader=%d ranges=%d failures=%d\\n\",\n"
 "           khz_abi_version(),\n"
 "           khz_simd_kernel_name(khz_simd_kernel()),\n"
 "           khz_simd_lanes(),\n"
 "           khz_ledger_available(),\n"
 "           khz_abi_xlsx_compiled(),\n"
 "           khz_abi_xlsx_reader_compiled(),\n"
+"           khz_abi_range_edges_compiled(),\n"
 "           failures);\n"
 "    return failures == 0 ? 0 : 1;\n"
 "}\n")
