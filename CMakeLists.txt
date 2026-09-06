@@ -332,6 +332,39 @@ if(KHZ_BUILD_TESTS)
         add_test(NAME khz_xlsx_test COMMAND khz_xlsx_test "${KHZ_FIXTURE}")
 
         message(STATUS "khz_sheet: end-to-end xlsx test enabled (${KHZ_PYTHON})")
+
+        # The same fixture, deliberately broken 800 ways. Reuses the generated
+        # archive rather than carrying its own, because the point is to start
+        # from something valid and damage it: corruption of a correct file
+        # reaches code paths that a hand-written invalid file rarely does,
+        # since a bad signature in the first four bytes is rejected before any
+        # of the interesting parsing happens.
+        add_executable(khz_fuzz_test tests/khz_fuzz_test.c)
+        target_link_libraries(khz_fuzz_test PRIVATE khz_sheet)
+        add_dependencies(khz_fuzz_test khz_fixture)
+
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(khz_fuzz_test PRIVATE -Wall -Wextra -Wshadow -Wvla)
+        endif()
+
+        add_test(NAME khz_fuzz_test COMMAND khz_fuzz_test "${KHZ_FIXTURE}")
+
+        # This test is the one whose result depends most on how the build was
+        # configured. Reading a few bytes past a buffer that sits inside a
+        # 64 MiB arena touches memory the process legitimately owns, so without
+        # ASAN nothing detects it and the test passes. Said at configure time
+        # so a green line in an ordinary build is not mistaken for evidence the
+        # decoder is memory safe on hostile input.
+        if(KHZ_SANITIZER_FLAGS)
+            message(STATUS "khz_sheet: malformed-input test enabled (sanitized)")
+        else()
+            message(STATUS
+                "khz_sheet: malformed-input test enabled, but this build has "
+                "no sanitizer. It will detect only crashes, not out-of-bounds "
+                "reads within the arena. Configure a second build directory "
+                "with -DKHZ_ENABLE_ASAN=ON -DKHZ_ENABLE_UBSAN=ON for a "
+                "meaningful result.")
+        endif()
     else()
         message(STATUS
             "khz_sheet: python3 not found; the end-to-end xlsx test is skipped. "
