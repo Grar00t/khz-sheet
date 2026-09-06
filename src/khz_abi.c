@@ -39,6 +39,26 @@ uint32_t khz_abi_version(void)
     return KHZ_ABI_VERSION;
 }
 
+size_t khz_abi_arena_offset(void)
+{
+    return offsetof(KhzSheet, arena);
+}
+
+size_t khz_abi_grid_offset(void)
+{
+    return offsetof(KhzSheet, grid);
+}
+
+size_t khz_abi_dep_graph_offset(void)
+{
+    return offsetof(KhzSheet, deps);
+}
+
+size_t khz_abi_proof_offset(void)
+{
+    return offsetof(KhzSheet, proof);
+}
+
 int khz_abi_simd_compiled(void)
 {
     return khz_simd_kernel() == KHZ_SIMD_SCALAR ? 0 : 1;
@@ -51,4 +71,9 @@ int khz_abi_ledger_compiled(void)
 #else
     return 0;
 #endif
+}
+
+int khz_abi_xlsx_compiled(void)
+{
+    return 1;
 }
