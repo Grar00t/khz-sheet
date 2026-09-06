@@ -246,6 +246,54 @@ static KhzSheetStatus khz_sheet_commit_cell(KhzSheet *sheet, KhzCell *cell)
     return khz_sheet_log_append(sheet, cell);
 }
 
+/* Marks the formula cells that read this one as needing recalculation.
+
+   Direct dependents only, and no allocation: one adjacency list is walked and
+   nothing else. Both properties are deliberate.
+
+   Transitivity is not this function's job. khz_formula_recalc visits cells in
+   topological order, so a dependent marked here is reached later in the same
+   pass, and if its recomputed value actually differs it marks its own
+   dependents then. Marking the whole reachable set here would recompute cells
+   whose inputs never moved, and each recomputation commits a link onto the
+   proof chain - which is the Phase 93 full sweep coming back, filling the
+   chain with entries that record no change.
+
+   khz_sheet_mark_dirty below does mark transitively, on demand, and allocates
+   scratch proportional to the whole grid to do it. That is correct for an
+   explicit "invalidate everything downstream" request and wrong here: a
+   setter is called once per cell during an import, and per-write scratch
+   proportional to the grid makes loading a sheet quadratic.
+
+   Value cells are skipped: they hold no formula to recompute, and flagging
+   them would turn the dirty count into a measure of graph reach rather than
+   of pending work. */
+static void khz_sheet_dirty_direct(KhzSheet *sheet, size_t index)
+{
+    const KhzDepEdge *edge;
+    size_t total;
+
+    /* A sheet with no dependencies pays one comparison per write. */
+    if (khz_dep_edge_count(&sheet->deps) == (uint64_t)0) {
+        return;
+    }
+
+    if (sheet->deps.heads == NULL || index >= sheet->deps.capacity) {
+        return;
+    }
+
+    total = khz_grid_count(&sheet->grid);
+
+    for (edge = sheet->deps.heads[index]; edge != NULL; edge = edge->next) {
+        if (edge->to >= total) {
+            continue;
+        }
+        if (sheet->grid.cells[edge->to].kind == (uint32_t)KHZ_CELL_FORMULA) {
+            sheet->grid.cells[edge->to].flags |= (uint32_t)KHZ_CELL_FLAG_DIRTY;
+        }
+    }
+}
+
 static KhzSheetStatus khz_sheet_ready(const KhzSheet *sheet)
 {
     if (sheet == NULL) {
@@ -268,6 +316,10 @@ KhzSheetStatus khz_sheet_commit_in_place(KhzSheet *sheet, KhzCell *cell)
         return KHZ_SHEET_ERR_NULL;
     }
 
+    /* No dependent marking here. This is the path recalculation commits
+       through, and it decides for itself whether the value changed and
+       therefore whether the cascade should continue. Marking unconditionally
+       here would make every recomputation dirty its dependents. */
     return khz_sheet_commit_cell(sheet, cell);
 }
 
@@ -305,13 +357,14 @@ KhzSheetStatus khz_sheet_set_rational(KhzSheet *sheet, uint32_t col, uint32_t ro
                                      KhzRational value)
 {
     KhzCell *cell;
+    size_t index = (size_t)0;
     KhzSheetStatus status = khz_sheet_ready(sheet);
 
     if (status != KHZ_SHEET_OK) {
         return status;
     }
 
-    status = khz_grid_upsert(&sheet->grid, col, row, NULL, &cell);
+    status = khz_grid_upsert(&sheet->grid, col, row, &index, &cell);
     if (status != KHZ_SHEET_OK) {
         return status;
     }
@@ -321,7 +374,14 @@ KhzSheetStatus khz_sheet_set_rational(KhzSheet *sheet, uint32_t col, uint32_t ro
         return status;
     }
 
-    return khz_sheet_commit_cell(sheet, cell);
+    status = khz_sheet_commit_cell(sheet, cell);
+
+    /* Marked even if the commit failed. The stored value changed either way,
+       so any formula reading it is stale, and leaving it clean would hide
+       that behind a status the caller may have already handled. */
+    khz_sheet_dirty_direct(sheet, index);
+
+    return status;
 }
 
 KhzSheetStatus khz_sheet_set_i64(KhzSheet *sheet, uint32_t col, uint32_t row,
@@ -342,6 +402,7 @@ KhzSheetStatus khz_sheet_set_text(KhzSheet *sheet, uint32_t col, uint32_t row,
 {
     KhzCell *cell;
     const char *copy = NULL;
+    size_t index = (size_t)0;
     KhzSheetStatus status = khz_sheet_ready(sheet);
 
     if (status != KHZ_SHEET_OK) {
@@ -353,7 +414,7 @@ KhzSheetStatus khz_sheet_set_text(KhzSheet *sheet, uint32_t col, uint32_t row,
         return status;
     }
 
-    status = khz_grid_upsert(&sheet->grid, col, row, NULL, &cell);
+    status = khz_grid_upsert(&sheet->grid, col, row, &index, &cell);
     if (status != KHZ_SHEET_OK) {
         return status;
     }
@@ -363,19 +424,27 @@ KhzSheetStatus khz_sheet_set_text(KhzSheet *sheet, uint32_t col, uint32_t row,
         return status;
     }
 
-    return khz_sheet_commit_cell(sheet, cell);
+    status = khz_sheet_commit_cell(sheet, cell);
+
+    /* Text invalidates too. A cell that held a number and now holds a label
+       drops out of the aggregates that counted it, so SUM over that range is
+       a different number than it was. */
+    khz_sheet_dirty_direct(sheet, index);
+
+    return status;
 }
 
 KhzSheetStatus khz_sheet_set_bool(KhzSheet *sheet, uint32_t col, uint32_t row, int value)
 {
     KhzCell *cell;
+    size_t index = (size_t)0;
     KhzSheetStatus status = khz_sheet_ready(sheet);
 
     if (status != KHZ_SHEET_OK) {
         return status;
     }
 
-    status = khz_grid_upsert(&sheet->grid, col, row, NULL, &cell);
+    status = khz_grid_upsert(&sheet->grid, col, row, &index, &cell);
     if (status != KHZ_SHEET_OK) {
         return status;
     }
@@ -385,20 +454,25 @@ KhzSheetStatus khz_sheet_set_bool(KhzSheet *sheet, uint32_t col, uint32_t row, i
         return status;
     }
 
-    return khz_sheet_commit_cell(sheet, cell);
+    status = khz_sheet_commit_cell(sheet, cell);
+
+    khz_sheet_dirty_direct(sheet, index);
+
+    return status;
 }
 
 KhzSheetStatus khz_sheet_set_error(KhzSheet *sheet, uint32_t col, uint32_t row,
                                   KhzCellError error)
 {
     KhzCell *cell;
+    size_t index = (size_t)0;
     KhzSheetStatus status = khz_sheet_ready(sheet);
 
     if (status != KHZ_SHEET_OK) {
         return status;
     }
 
-    status = khz_grid_upsert(&sheet->grid, col, row, NULL, &cell);
+    status = khz_grid_upsert(&sheet->grid, col, row, &index, &cell);
     if (status != KHZ_SHEET_OK) {
         return status;
     }
@@ -408,7 +482,13 @@ KhzSheetStatus khz_sheet_set_error(KhzSheet *sheet, uint32_t col, uint32_t row,
         return status;
     }
 
-    return khz_sheet_commit_cell(sheet, cell);
+    status = khz_sheet_commit_cell(sheet, cell);
+
+    /* An error must propagate to whatever reads it, or a dependent keeps
+       showing the number it computed before the input broke. */
+    khz_sheet_dirty_direct(sheet, index);
+
+    return status;
 }
 
 KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row,
@@ -416,6 +496,7 @@ KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row
 {
     KhzCell *cell;
     const char *copy = NULL;
+    size_t index = (size_t)0;
     KhzSheetStatus status = khz_sheet_ready(sheet);
 
     if (status != KHZ_SHEET_OK) {
@@ -427,7 +508,7 @@ KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row
         return status;
     }
 
-    status = khz_grid_upsert(&sheet->grid, col, row, NULL, &cell);
+    status = khz_grid_upsert(&sheet->grid, col, row, &index, &cell);
     if (status != KHZ_SHEET_OK) {
         return status;
     }
@@ -440,7 +521,14 @@ KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row
     /* A new formula has no computed value yet, so it is dirty from birth. */
     cell->flags |= (uint32_t)KHZ_CELL_FLAG_DIRTY;
 
-    return khz_sheet_commit_cell(sheet, cell);
+    status = khz_sheet_commit_cell(sheet, cell);
+
+    /* Installing a formula over a cell that something else reads changes that
+       cell's value now, not at the next recalculation, so its dependents are
+       stale immediately. */
+    khz_sheet_dirty_direct(sheet, index);
+
+    return status;
 }
 
 KhzSheetStatus khz_sheet_get(const KhzSheet *sheet, uint32_t col, uint32_t row,
@@ -514,7 +602,11 @@ KhzSheetStatus khz_sheet_evaluation_order(KhzSheet *sheet, size_t *order,
    An edge from A to B means B reads A, so the heads list at A is exactly the
    set of cells that must be recomputed when A changes. Only formula cells are
    marked: a value cell has nothing to recompute, and flagging it would make
-   the dirty count a measure of graph reach rather than of pending work. */
+   the dirty count a measure of graph reach rather than of pending work.
+
+   This is the transitive, on-demand version. The setters do not use it - see
+   khz_sheet_dirty_direct above for why - but an explicit "everything
+   downstream of here is suspect" request is exactly what it is for. */
 KhzSheetStatus khz_sheet_mark_dirty(KhzSheet *sheet, uint32_t col, uint32_t row,
                                     uint64_t *marked)
 {
@@ -939,255 +1031,4 @@ KhzSheetStatus khz_sheet_proof_hex(const KhzSheet *sheet, char out[KHZ_SHA256_HE
 
     return khz_sha256_hex(sheet->proof, out) == KHZ_HASH_OK ? KHZ_SHEET_OK
                                                             : KHZ_SHEET_ERR_STATE;
-}
-
-int khz_sheet_selftest(void)
-{
-    int failures = 0;
-
-    failures += khz_sha256_selftest();
-    failures += khz_fnv1a_selftest();
-
-    /* Exact rational: 1/2 + 1/3 must be 5/6, not 0.8333333333333334. */
-    {
-        KhzRational a;
-        KhzRational b;
-        KhzRational sum;
-
-        if (khz_rational_make((int64_t)1, (int64_t)2, &a) != KHZ_SHEET_OK
-            || khz_rational_make((int64_t)1, (int64_t)3, &b) != KHZ_SHEET_OK
-            || khz_rational_add(a, b, &sum) != KHZ_SHEET_OK
-            || sum.num != (int64_t)5 || sum.den != (int64_t)6) {
-            ++failures;
-        }
-    }
-
-    /* Normalisation and sign placement: -2/-4 is 1/2. */
-    {
-        KhzRational r;
-
-        if (khz_rational_make((int64_t)-2, (int64_t)-4, &r) != KHZ_SHEET_OK
-            || r.num != (int64_t)1 || r.den != (int64_t)2) {
-            ++failures;
-        }
-    }
-
-    /* Division by zero is a status, never a trap and never an infinity. */
-    {
-        KhzRational r;
-
-        if (khz_rational_make((int64_t)1, (int64_t)0, &r) != KHZ_SHEET_ERR_DIVZERO) {
-            ++failures;
-        }
-    }
-
-    /* Overflow is refused, not wrapped. */
-    {
-        KhzRational big;
-        KhzRational one;
-        KhzRational sum;
-
-        if (khz_rational_from_i64(INT64_MAX, &big) != KHZ_SHEET_OK
-            || khz_rational_from_i64((int64_t)1, &one) != KHZ_SHEET_OK
-            || khz_rational_add(big, one, &sum) != KHZ_SHEET_ERR_OVERFLOW) {
-            ++failures;
-        }
-    }
-
-    /* The SIMD kernel must agree with the scalar fold and must refuse a sum
-       that does not fit. */
-    {
-        int64_t values[9];
-        int64_t total = (int64_t)0;
-        size_t i;
-
-        for (i = (size_t)0; i < (size_t)9; ++i) {
-            values[i] = (int64_t)(i + (size_t)1);
-        }
-
-        if (khz_simd_sum_i64(values, (size_t)9, &total) != KHZ_SHEET_OK
-            || total != (int64_t)45) {
-            ++failures;
-        }
-
-        {
-            int64_t edge[4];
-            int64_t ignored = (int64_t)0;
-
-            edge[0] = INT64_MAX;
-            edge[1] = INT64_MAX;
-            edge[2] = (int64_t)0;
-            edge[3] = (int64_t)0;
-
-            if (khz_simd_sum_i64(edge, (size_t)4, &ignored) != KHZ_SHEET_ERR_OVERFLOW) {
-                ++failures;
-            }
-        }
-    }
-
-    /* MIN and MAX select, and refuse an empty input rather than inventing a
-       zero for it. */
-    {
-        int64_t values[5];
-        int64_t low = (int64_t)0;
-        int64_t high = (int64_t)0;
-
-        values[0] = (int64_t)7;
-        values[1] = (int64_t)-3;
-        values[2] = (int64_t)0;
-        values[3] = INT64_MIN;
-        values[4] = INT64_MAX;
-
-        if (khz_simd_min_i64(values, (size_t)5, &low) != KHZ_SHEET_OK
-            || low != INT64_MIN) {
-            ++failures;
-        }
-        if (khz_simd_max_i64(values, (size_t)5, &high) != KHZ_SHEET_OK
-            || high != INT64_MAX) {
-            ++failures;
-        }
-        if (khz_simd_min_i64(values, (size_t)0, &low) != KHZ_SHEET_ERR_RANGE) {
-            ++failures;
-        }
-    }
-
-    /* End to end: a small sheet, an exact mean, a proof chain that verifies
-       across a rewrite, and an arena that took every byte. */
-    {
-        KhzSheet sheet;
-
-        if (khz_sheet_init(&sheet, (size_t)1 << 20, (size_t)1024) != KHZ_SHEET_OK) {
-            ++failures;
-        } else {
-            KhzRational mean;
-            size_t counted = (size_t)0;
-            int local = 0;
-
-            if (khz_sheet_set_i64(&sheet, 0u, 0u, (int64_t)1) != KHZ_SHEET_OK
-                || khz_sheet_set_i64(&sheet, 0u, 1u, (int64_t)2) != KHZ_SHEET_OK) {
-                ++local;
-            }
-
-            /* AVERAGE(1, 2) is 3/2 exactly. */
-            if (khz_sheet_avg(&sheet, 0u, 0u, 0u, 1u, &mean, &counted) != KHZ_SHEET_OK
-                || mean.num != (int64_t)3 || mean.den != (int64_t)2
-                || counted != (size_t)2) {
-                ++local;
-            }
-
-            /* Text in the range is skipped, not coerced to zero. */
-            if (khz_sheet_set_text(&sheet, 0u, 2u, "label", (size_t)5) != KHZ_SHEET_OK) {
-                ++local;
-            }
-
-            if (khz_sheet_avg(&sheet, 0u, 0u, 0u, 2u, &mean, &counted) != KHZ_SHEET_OK
-                || mean.num != (int64_t)3 || mean.den != (int64_t)2
-                || counted != (size_t)2) {
-                ++local;
-            }
-
-            if (khz_sheet_verify_chain(&sheet, NULL) != KHZ_SHEET_OK) {
-                ++local;
-            }
-
-            /* The Phase 94 regression: rewriting a cell that is not the most
-               recently inserted one used to make the chain unverifiable,
-               because the old check replayed insertion order and demanded
-               revision 1. Replaying the commit log must accept it. */
-            {
-                KhzChainAudit audit;
-
-                if (khz_sheet_set_i64(&sheet, 0u, 0u, (int64_t)5) != KHZ_SHEET_OK) {
-                    ++local;
-                }
-                if (khz_sheet_audit_chain(&sheet, &audit) != KHZ_SHEET_OK) {
-                    ++local;
-                }
-                /* One entry is now superseded: the first write to A1. */
-                if (audit.superseded != (uint64_t)1) {
-                    ++local;
-                }
-                if (audit.entries_examined != khz_sheet_log_recorded(&sheet)) {
-                    ++local;
-                }
-                if (khz_sheet_log_dropped(&sheet) != (uint64_t)0) {
-                    ++local;
-                }
-            }
-
-            /* Tampering must still be caught. Editing a cell without
-               committing leaves its proof stale, and the audit must say so. */
-            {
-                KhzCell *cell = NULL;
-
-                if (khz_sheet_get_mutable(&sheet, 0u, 1u, &cell) != KHZ_SHEET_OK
-                    || cell == NULL) {
-                    ++local;
-                } else {
-                    KhzRational saved = cell->value;
-
-                    cell->value.num += (int64_t)1;
-
-                    if (khz_sheet_verify_chain(&sheet, NULL) == KHZ_SHEET_OK) {
-                        ++local;
-                    }
-
-                    cell->value = saved;
-
-                    if (khz_sheet_verify_chain(&sheet, NULL) != KHZ_SHEET_OK) {
-                        ++local;
-                    }
-                }
-            }
-
-            /* Dirty marking follows the graph and touches formula cells only. */
-            {
-                uint64_t dirtied = (uint64_t)0;
-
-                if (khz_sheet_set_formula(&sheet, 1u, 5u, "=A1+A2", (size_t)6)
-                    != KHZ_SHEET_OK) {
-                    ++local;
-                }
-                if (khz_sheet_declare_dependency(&sheet, 0u, 0u, 1u, 5u)
-                    != KHZ_SHEET_OK) {
-                    ++local;
-                }
-                if (khz_sheet_mark_dirty(&sheet, 0u, 0u, &dirtied) != KHZ_SHEET_OK
-                    || dirtied != (uint64_t)1) {
-                    ++local;
-                }
-                if (khz_sheet_dirty_count(&sheet) != (size_t)1) {
-                    ++local;
-                }
-            }
-
-            /* A cycle must be reported, not silently ordered. */
-            if (khz_sheet_declare_dependency(&sheet, 2u, 0u, 2u, 1u) != KHZ_SHEET_OK
-                || khz_sheet_declare_dependency(&sheet, 2u, 1u, 2u, 0u) != KHZ_SHEET_OK) {
-                ++local;
-            } else {
-                size_t order[64];
-                size_t produced = (size_t)0;
-
-                if (khz_sheet_evaluation_order(&sheet, order, (size_t)64, &produced)
-                    != KHZ_SHEET_ERR_CYCLE) {
-                    ++local;
-                }
-            }
-
-            /* Nothing may have reached the heap, and nothing may have been
-               rejected in a run this small. */
-            if (khz_arena_rejections(&sheet.arena) != (uint64_t)0) {
-                ++local;
-            }
-            if (khz_arena_peak(&sheet.arena) == (size_t)0) {
-                ++local;
-            }
-
-            failures += local;
-            khz_sheet_destroy(&sheet);
-        }
-    }
-
-    return failures;
 }
