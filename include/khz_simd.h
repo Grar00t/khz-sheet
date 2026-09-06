@@ -55,6 +55,39 @@ KhzSheetStatus khz_simd_sum_rational(const KhzRational *values, size_t count,
 KhzSheetStatus khz_simd_avg_rational(const KhzRational *values, size_t count,
                                      KhzRational *out);
 
+/* Smallest and largest int64 in the array.
+
+   count == 0 is KHZ_SHEET_ERR_RANGE, not zero. SUM has an identity element and
+   MIN does not: the smallest of nothing is not a number, and returning 0 would
+   be a claim about data that is not there. This asymmetry with khz_simd_sum_i64
+   is deliberate.
+
+   These cannot overflow. The result is always one of the inputs, so there is
+   no arithmetic to trap and no KHZ_SHEET_ERR_OVERFLOW path - claiming to check
+   for one would be theatre. Error handling is otherwise identical to SUM: null
+   arguments are refused and *out is untouched on any failure.
+
+   Vectorised with compare-and-blend rather than a min instruction, because
+   64-bit integer min is AVX-512 and SVE, not AVX2 or baseline NEON. The vector
+   and scalar paths select the same element on every input. */
+KhzSheetStatus khz_simd_min_i64(const int64_t *values, size_t count, int64_t *out);
+KhzSheetStatus khz_simd_max_i64(const int64_t *values, size_t count, int64_t *out);
+
+/* Smallest and largest rational, compared exactly.
+
+   Scalar by necessity: comparing a/b against c/d is a cross multiplication, and
+   there is no vector 128-bit product to make it safe. Unlike the int64 forms,
+   these can return KHZ_SHEET_ERR_OVERFLOW - not from the selection but from
+   khz_rational_compare, when the cross products do not fit in int64. An
+   overflowing comparison is reported rather than guessed at, so a MIN over
+   pathological denominators refuses instead of returning the wrong element.
+
+   count == 0 is KHZ_SHEET_ERR_RANGE. */
+KhzSheetStatus khz_simd_min_rational(const KhzRational *values, size_t count,
+                                     KhzRational *out);
+KhzSheetStatus khz_simd_max_rational(const KhzRational *values, size_t count,
+                                     KhzRational *out);
+
 #ifdef __cplusplus
 }
 #endif
