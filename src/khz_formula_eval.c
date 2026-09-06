@@ -280,6 +280,7 @@ static KhzSheetStatus khz_agg_integer_lane(KhzSheet *sheet, const KhzAgg *agg,
 
     lane = (int64_t *)khz_arena_alloc(arena, agg->count * sizeof(int64_t));
     if (lane == NULL) {
+        (void)khz_arena_release(arena, mark);
         return KHZ_SHEET_ERR_MEMORY;
     }
 
@@ -600,11 +601,20 @@ static KhzSheetStatus khz_declare_walk(KhzSheet *sheet, const KhzFormulaNode *no
     if (node->op == (uint32_t)KHZ_FORMULA_RANGE) {
         size_t j;
 
-        /* One edge per cell that exists in the rectangle. A cell created inside
-           the range later is not retroactively linked, so a range edge is only
-           as complete as the sheet was when the formula was set. Recorded
-           rather than papered over: fixing it needs a range-edge form in the
-           dependency graph, which is Phase 94 work. */
+        /* TODO (range edges are not retroactive).
+
+           One edge per cell that exists in the rectangle at declaration time.
+           A cell created inside the range afterwards is never linked, so
+           =SUM(A1:A100) will not notice a value later typed into A50 unless
+           the formula is set again.
+
+           Not fixed in Phase 94, and deliberately not papered over with a
+           workaround: the honest fix is a range-edge form in KhzDepGraph, so
+           an edge names a rectangle rather than a list of cells and
+           membership is tested at recalculation time instead of frozen at
+           declaration time. That changes khz_dep_add_edge, khz_dep_topo and
+           the indegree accounting together, which is a graph change rather
+           than an evaluator change and does not belong in this file. */
         for (j = (size_t)0; j < sheet->grid.cell_count; ++j) {
             const KhzCell *cell = &sheet->grid.cells[j];
 
@@ -700,9 +710,61 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
         return status;
     }
 
+    /* khz_sheet_set_formula marks the new cell dirty, so the next recalc
+       picks it up without a full sweep being needed to find it. */
     return khz_sheet_set_formula(sheet, col, row, source, len);
 }
 
+/* Marks the direct dependents of a cell as needing recalculation.
+
+   Only direct dependents: recalculation walks topological order, so a cell
+   marked here is always visited later in the same pass, and when its own value
+   changes it marks its dependents in turn. Transitivity comes from the order,
+   not from a second traversal. */
+static void khz_dirty_dependents(KhzSheet *sheet, size_t index)
+{
+    const KhzDepEdge *edge;
+
+    if (sheet->deps.heads == NULL || index >= sheet->deps.capacity) {
+        return;
+    }
+
+    for (edge = sheet->deps.heads[index]; edge != NULL; edge = edge->next) {
+        if (edge->to >= sheet->grid.cell_count) {
+            continue;
+        }
+        if (sheet->grid.cells[edge->to].kind == (uint32_t)KHZ_CELL_FORMULA) {
+            sheet->grid.cells[edge->to].flags |= (uint32_t)KHZ_CELL_FLAG_DIRTY;
+        }
+    }
+}
+
+static int khz_value_changed(const KhzCell *cell, const KhzFormulaResult *result)
+{
+    if (khz_result_is_error(result)) {
+        return cell->error != result->error ? 1 : 0;
+    }
+
+    if (cell->error != (uint32_t)KHZ_CELL_ERROR_NONE) {
+        return 1;
+    }
+
+    return cell->value.num != result->value.num
+        || cell->value.den != result->value.den ? 1 : 0;
+}
+
+/* Recalculates the formula cells that are marked dirty, in topological order.
+
+   Phase 93 recomputed and re-committed every formula cell on the sheet on
+   every call. That was not merely slow: each commit forms a link in the proof
+   chain, so a sweep of a thousand untouched formulas appended a thousand
+   chain entries recording that nothing had changed. The chain is meant to be
+   a record of edits, and a sweep filled it with non-edits.
+
+   So a cell is recomputed only when its dirty flag is set, and the flag
+   spreads along the dependency graph as values actually change. A cell whose
+   recomputed value is identical to the one it already held is committed but
+   does not dirty its dependents, which stops a no-op edit from cascading. */
 KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 {
     KhzArena *arena;
@@ -718,6 +780,10 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         return KHZ_SHEET_ERR_NULL;
     }
 
+    if (evaluated != NULL) {
+        *evaluated = (uint64_t)0;
+    }
+
     arena = khz_sheet_arena(sheet);
     if (arena == NULL) {
         return KHZ_SHEET_ERR_STATE;
@@ -725,9 +791,6 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
     capacity = khz_sheet_cell_count(sheet);
     if (capacity == (size_t)0) {
-        if (evaluated != NULL) {
-            *evaluated = (uint64_t)0;
-        }
         return KHZ_SHEET_OK;
     }
 
@@ -735,6 +798,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
     order = (size_t *)khz_arena_alloc(arena, capacity * sizeof(size_t));
     if (order == NULL) {
+        (void)khz_arena_release(arena, mark);
         return KHZ_SHEET_ERR_MEMORY;
     }
 
@@ -750,6 +814,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         KhzCell *cell;
         KhzFormula formula;
         KhzFormulaResult result;
+        int changed;
 
         if (order[i] >= sheet->grid.cell_count) {
             (void)khz_arena_release(arena, mark);
@@ -759,6 +824,13 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         cell = &sheet->grid.cells[order[i]];
 
         if (cell->kind != (uint32_t)KHZ_CELL_FORMULA || cell->formula == NULL) {
+            continue;
+        }
+
+        /* Clean cells are skipped. Their cached value is current by
+           construction: it was computed after the last change to anything
+           they read, which is exactly what clearing the flag recorded. */
+        if ((cell->flags & (uint32_t)KHZ_CELL_FLAG_DIRTY) == 0u) {
             continue;
         }
 
@@ -777,9 +849,12 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
             return status;
         }
 
-        /* Written in place, keeping kind FORMULA. The setters cannot be used
-           here: khz_sheet_set_rational would replace the formula with its own
-           result and the sheet would forget how the number was produced. */
+        changed = khz_value_changed(cell, &result);
+
+        /* Written in place through grid.cells[], keeping kind FORMULA and the
+           source text. The setters cannot be used here: khz_sheet_set_rational
+           would replace the formula with its own result and the sheet would
+           forget how the number was produced. */
         if (khz_result_is_error(&result)) {
             cell->error = result.error;
             status = khz_rational_make((int64_t)0, (int64_t)1, &cell->value);
@@ -796,16 +871,21 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
         cell->flags &= ~(uint32_t)KHZ_CELL_FLAG_DIRTY;
 
-        /* Same three steps every setter in khz_sheet.c performs: commit onto
-           the head, adopt the new proof as the head, count the event. */
-        status = khz_cell_commit(cell, sheet->proof);
+        /* One commit path for the whole system. This used to write
+           sheet->proof and bump the counter directly, duplicating what the
+           setters do; since Phase 94 the sheet also records every commit in
+           its log, and a link formed without an entry would leave
+           khz_sheet_audit_chain unable to account for the head it found. */
+        status = khz_sheet_commit_in_place(sheet, cell);
         if (status != KHZ_SHEET_OK) {
             (void)khz_arena_release(arena, mark);
             return status;
         }
 
-        memcpy(sheet->proof, cell->proof, KHZ_CELL_PROOF_BYTES);
-        sheet->commits += (uint64_t)1;
+        if (changed) {
+            khz_dirty_dependents(sheet, order[i]);
+        }
+
         ++done;
     }
 
