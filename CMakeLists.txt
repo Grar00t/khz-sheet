@@ -18,12 +18,99 @@ option(KHZ_ENABLE_LEDGER "Compile the SQLite proof-chain ledger" ON)
 option(KHZ_BUILD_SELFTEST "Build the self-test executable" ON)
 option(KHZ_BUILD_TESTS "Build the end-to-end tests under tests/" ON)
 option(KHZ_BUILD_SHARED "Build the shared library used by the C# bindings" ON)
+option(KHZ_ENABLE_ASAN "Build with AddressSanitizer" OFF)
+option(KHZ_ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
 
 # Enabled unconditionally and at the top level. This used to live inside the
 # selftest block, which meant configuring with -DKHZ_BUILD_SELFTEST=OFF
 # produced a build with no test infrastructure at all rather than one test
 # fewer, and `ctest` in that build reported success over an empty list.
 enable_testing()
+
+include(CheckCCompilerFlag)
+
+# Sanitizers.
+#
+# Applied at directory scope, before any target is defined, so they reach every
+# object and every executable including the generated selftest and the tests
+# under tests/. A sanitizer that covers the library but not the test harness
+# that drives it is close to useless.
+#
+# Two decisions here are deliberate and worth stating.
+#
+# First: asking for a sanitizer that cannot be linked is a FATAL_ERROR, never a
+# downgrade. libasan and libubsan ship as separate packages on Debian and
+# Ubuntu and are commonly missing even where gcc is present - the compiler will
+# happily accept -fsanitize=address and then fail at link, or worse, a
+# configure-time probe that only checked compilation would pass and leave the
+# operator believing the build was sanitized. Failing loudly is the only safe
+# behaviour, because the whole point of this build is that its passing ctest
+# line means something stronger than the ordinary one.
+#
+# Second: -fno-sanitize-recover=undefined. UBSAN's default is to print a
+# diagnostic to stderr and keep going. The process then exits 0, ctest records
+# a pass, and genuine undefined behaviour scrolls past in output nobody reads.
+# Aborting on the first finding converts UB into a test failure.
+#
+# ASAN is not given halt_on_error explicitly: it aborts on first error by
+# default, which is already the behaviour wanted here.
+set(KHZ_SANITIZER_FLAGS "")
+
+if(KHZ_ENABLE_ASAN)
+    list(APPEND KHZ_SANITIZER_FLAGS -fsanitize=address)
+endif()
+
+if(KHZ_ENABLE_UBSAN)
+    list(APPEND KHZ_SANITIZER_FLAGS -fsanitize=undefined -fno-sanitize-recover=undefined)
+endif()
+
+if(KHZ_SANITIZER_FLAGS)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        message(FATAL_ERROR
+            "KHZ_ENABLE_ASAN or KHZ_ENABLE_UBSAN was requested but the "
+            "sanitizer flags are GCC and Clang specific and this compiler is "
+            "${CMAKE_C_COMPILER_ID}. Refusing to configure a build that would "
+            "report passing tests without a sanitizer attached.")
+    endif()
+
+    # The probe links as well as compiles. Checking compilation alone would pass
+    # on a machine with gcc but without the sanitizer runtime, which is exactly
+    # the case this needs to catch.
+    set(CMAKE_REQUIRED_FLAGS ${KHZ_SANITIZER_FLAGS})
+    set(CMAKE_REQUIRED_LINK_OPTIONS ${KHZ_SANITIZER_FLAGS})
+    check_c_compiler_flag("" KHZ_SANITIZERS_LINK)
+    unset(CMAKE_REQUIRED_FLAGS)
+    unset(CMAKE_REQUIRED_LINK_OPTIONS)
+
+    if(NOT KHZ_SANITIZERS_LINK)
+        message(FATAL_ERROR
+            "Sanitizers were requested but a test program could not be linked "
+            "with ${KHZ_SANITIZER_FLAGS}. The runtime libraries are packaged "
+            "separately from the compiler; on Debian and Ubuntu install "
+            "libasan and libubsan (for example: sudo apt install -y libasan8 "
+            "libubsan1), or configure without -DKHZ_ENABLE_ASAN=ON and "
+            "-DKHZ_ENABLE_UBSAN=ON. This is a hard error on purpose: silently "
+            "producing an unsanitized build would make a passing ctest run "
+            "look like evidence of memory safety when nothing was checked.")
+    endif()
+
+    # -g and a kept frame pointer are what turn a sanitizer report from an
+    # address into a file and line. Without them the diagnostic still fires but
+    # is far harder to act on.
+    add_compile_options(${KHZ_SANITIZER_FLAGS} -g -fno-omit-frame-pointer)
+    add_link_options(${KHZ_SANITIZER_FLAGS})
+
+    message(STATUS "khz_sheet: sanitizers active: ${KHZ_SANITIZER_FLAGS}")
+
+    # -O3 does not disable sanitizers, but inlining folds frames together and
+    # makes reports harder to read. Worth a note rather than overriding a
+    # setting the operator chose deliberately.
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        message(STATUS
+            "khz_sheet: sanitizers are active in a Release build; consider "
+            "-DCMAKE_BUILD_TYPE=Debug for readable stack traces")
+    endif()
+endif()
 
 # Sources are listed, not globbed. A glob would silently pick up any stray .c
 # file left in the tree and produce duplicate symbols; an explicit list fails
@@ -84,7 +171,6 @@ endif()
 # unconditionally would break every non-x86 build, and khz_simd.c already
 # selects NEON or scalar from the predefined macros, so the kernel that gets
 # compiled always matches the flags that were used.
-include(CheckCCompilerFlag)
 check_c_compiler_flag("-mavx2" KHZ_COMPILER_ACCEPTS_MAVX2)
 
 if(KHZ_ENABLE_AVX2 AND KHZ_COMPILER_ACCEPTS_MAVX2)
@@ -142,6 +228,18 @@ if(KHZ_BUILD_SHARED)
 
     if(KHZ_LEDGER_ACTIVE)
         target_link_libraries(khz_sheet_shared PUBLIC ${KHZ_SQLITE3_LIBRARY})
+    endif()
+
+    # A sanitized shared library is loadable by a non-sanitized host process
+    # such as `dotnet`, but only with the runtime preloaded, and ASAN's
+    # allocator interception is unreliable in that configuration. Worth saying
+    # here rather than leaving it to be discovered from a confusing crash
+    # inside the CLR.
+    if(KHZ_SANITIZER_FLAGS)
+        message(STATUS
+            "khz_sheet: libkhz_sheet.so is sanitized; P/Invoke from dotnet "
+            "needs LD_PRELOAD of the sanitizer runtime. Use a separate "
+            "unsanitized build directory for the C# bindings.")
     endif()
 endif()
 
