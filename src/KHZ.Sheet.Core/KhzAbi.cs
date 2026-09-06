@@ -24,6 +24,34 @@ namespace KHZ.Sheet.Core
 	}
 
 	/// <summary>
+	/// Entry points added after Phase 91, declared here rather than in
+	/// KhzNative.cs.
+	///
+	/// Not a stylistic choice: KhzNative.cs is thirty kilobytes, complete-file
+	/// pushes are the only commit form this repository uses, and a push that
+	/// size has already truncated a file here once. Declaring the two queries
+	/// this gate needs beside the gate itself costs nothing - a DllImport is a
+	/// declaration, so several classes may declare the same native function
+	/// without conflict.
+	/// </summary>
+	internal static class KhzAbiNative
+	{
+		internal const string Lib = "khz_sheet";
+
+		[DllImport(Lib, EntryPoint = "khz_abi_dep_edge_bytes",
+			CallingConvention = CallingConvention.Cdecl)]
+		internal static extern nuint DepEdgeBytes();
+
+		[DllImport(Lib, EntryPoint = "khz_abi_dep_range_edge_bytes",
+			CallingConvention = CallingConvention.Cdecl)]
+		internal static extern nuint DepRangeEdgeBytes();
+
+		[DllImport(Lib, EntryPoint = "khz_abi_range_edges_compiled",
+			CallingConvention = CallingConvention.Cdecl)]
+		internal static extern int RangeEdgesCompiled();
+	}
+
+	/// <summary>
 	/// Checks that the managed struct mirrors match the native ones before any
 	/// pointer is dereferenced. Without this a layout change in C would be read
 	/// at wrong offsets and corrupt memory silently, which is far worse than a
@@ -53,8 +81,17 @@ namespace KHZ.Sheet.Core
 		/// still mirror by hand, and accepting it would mean reading a KhzCell at
 		/// offsets that no longer describe it. Refusing to load is recoverable;
 		/// reading a struct at stale offsets is not.
+		///
+		/// 95 is Phase 96: KhzDepGraph gained a region list and two counters, so
+		/// sizeof(KhzDepGraph) grew and every KhzSheet member after it moved.
+		/// Nothing this file mirrors by hand was affected - the moved offsets are
+		/// all resolved at runtime by KhzSheetLayout - which is exactly why the
+		/// window widens instead of the bindings being rewritten.
 		/// </summary>
-		public const uint CurrentVersion = 94u;
+		public const uint CurrentVersion = 95u;
+
+		/// <summary>First ABI revision that resolves ranges as regions.</summary>
+		public const uint RangeEdgeVersion = 95u;
 
 		/// <summary>
 		/// Byte offsets of the two KhzCell fields this layer mirrors by hand.
@@ -68,6 +105,7 @@ namespace KHZ.Sheet.Core
 		private static SheetStatus _result = SheetStatus.ErrState;
 		private static string _detail = "not checked";
 		private static KhzAbiSizes _sizes;
+		private static nuint _rangeEdgeBytes;
 
 		/// <summary>
 		/// Ok when the native library agrees with these bindings. ErrUnsupported
@@ -189,11 +227,131 @@ namespace KHZ.Sheet.Core
 				return _result;
 			}
 
+			SheetStatus rangeCheck = VerifyRangeEdgeLayout(sizes, out string rangeDetail);
+
+			if (rangeCheck != SheetStatus.Ok)
+			{
+				_result = rangeCheck;
+				_detail = rangeDetail;
+				detail = _detail;
+				return _result;
+			}
+
 			_sizes = sizes;
 			_result = SheetStatus.Ok;
-			_detail = "ok, native ABI " + sizes.Version.ToString();
+			_detail = "ok, native ABI " + sizes.Version.ToString() + rangeDetail;
 			detail = _detail;
 			return _result;
+		}
+
+		/// <summary>
+		/// Checks sizeof(KhzDepRangeEdge) against what the declared C layout
+		/// implies for this target.
+		///
+		/// The struct is a four-uint32 rectangle, two size_t and one pointer, so
+		/// the expected size is derived from the widths the native library just
+		/// reported rather than hardcoded - 40 bytes on LP64 and 28 on ILP32, and
+		/// writing either number here would be wrong on the other target.
+		///
+		/// A larger value is accepted up to one alignment unit, because trailing
+		/// padding is the compiler's business. A smaller value cannot be padding
+		/// and means the struct is not the one this comment describes.
+		///
+		/// Nothing on the managed side allocates a range edge - the arena does -
+		/// so this is an assertion about agreement, not a prerequisite for a
+		/// pointer operation. It is here because a future phase that changes the
+		/// rectangle representation without bumping the version would otherwise
+		/// pass the gate unnoticed.
+		/// </summary>
+		private static SheetStatus VerifyRangeEdgeLayout(KhzAbiSizes sizes, out string detail)
+		{
+			if (sizes.Version < RangeEdgeVersion)
+			{
+				// 91 through 94 have no region list and no export to ask about it.
+				// Ranges are frozen at declaration time on those libraries, which
+				// is a defect but not a memory-safety question.
+				detail = ", ranges frozen (pre-95 library)";
+				return SheetStatus.Ok;
+			}
+
+			nuint actual;
+
+			try
+			{
+				actual = KhzAbiNative.DepRangeEdgeBytes();
+			}
+			catch (EntryPointNotFoundException)
+			{
+				// The library claims 95 or later but does not export the query.
+				// Reported rather than assumed either way.
+				detail = "native ABI " + sizes.Version.ToString()
+					+ " does not export khz_abi_dep_range_edge_bytes";
+				return SheetStatus.ErrUnsupported;
+			}
+
+			nuint expected = (nuint)16 + (nuint)(2u * sizes.SizeTBytes)
+				+ (nuint)sizes.PointerBytes;
+			nuint tolerance = expected + (nuint)sizes.PointerBytes;
+
+			if (actual < expected || actual > tolerance)
+			{
+				detail = "KhzDepRangeEdge size mismatch: native " + actual.ToString()
+					+ ", expected about " + expected.ToString()
+					+ " for a " + sizes.PointerBytes.ToString() + "-byte pointer target";
+				return SheetStatus.ErrUnsupported;
+			}
+
+			_rangeEdgeBytes = actual;
+			detail = ", retroactive ranges";
+			return SheetStatus.Ok;
+		}
+
+		/// <summary>
+		/// sizeof(KhzDepRangeEdge) as reported by the native library, or zero
+		/// when verification failed or the library predates region edges.
+		/// </summary>
+		public static nuint RangeEdgeBytes
+		{
+			get
+			{
+				string ignored;
+				return Verify(out ignored) == SheetStatus.Ok ? _rangeEdgeBytes : (nuint)0;
+			}
+		}
+
+		/// <summary>
+		/// True when the native library resolves a range reference as a region
+		/// that later cells join, rather than as a list of cells frozen when the
+		/// formula was entered.
+		///
+		/// Worth asking before trusting a recalculated total: on a library that
+		/// returns false, a value typed into the middle of a summed range after
+		/// the formula was entered is not included.
+		/// </summary>
+		public static bool RangeEdgesAvailable
+		{
+			get
+			{
+				string ignored;
+
+				if (Verify(out ignored) != SheetStatus.Ok)
+				{
+					return false;
+				}
+				if (_sizes.Version < RangeEdgeVersion)
+				{
+					return false;
+				}
+
+				try
+				{
+					return KhzAbiNative.RangeEdgesCompiled() != 0;
+				}
+				catch (EntryPointNotFoundException)
+				{
+					return false;
+				}
+			}
 		}
 
 		internal static SheetStatus Sizes(out KhzAbiSizes sizes)
