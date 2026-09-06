@@ -229,7 +229,22 @@ namespace KHZ.Sheet.Core
 			{
 				case FormulaTokenKind.Number:
 					state.Index++;
-					node = new NumberNode(token.Number);
+
+					// token.Text is the literal exactly as it was written, which the
+					// lexer has always captured; token.Number is the same digits
+					// after double.TryParse, which is lossy for anything not
+					// representable in binary floating point.
+					//
+					// This used to pass only the double. The exact text was computed,
+					// stored on the token, carried into the parser and then dropped
+					// here, three lines from the only place that can use it - which
+					// left the two-argument constructor added in Phase 96 with no
+					// caller and RawText null on every node ever parsed.
+					//
+					// The text is not normalised on the way through. Trimming zeros
+					// or reformatting would reintroduce the loss this exists to
+					// avoid, and "0.10" and "0.1" are the same rational anyway.
+					node = new NumberNode(token.Number, token.Text);
 					return SheetStatus.Ok;
 
 				case FormulaTokenKind.Text:
