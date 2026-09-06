@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "khz_formula.h"
 #include "khz_grid.h"
 #include "khz_ledger.h"
 #include "khz_sheet.h"
@@ -59,6 +60,31 @@ size_t khz_abi_proof_offset(void)
     return offsetof(KhzSheet, proof);
 }
 
+size_t khz_abi_commit_log_offset(void)
+{
+    return offsetof(KhzSheet, log);
+}
+
+size_t khz_abi_sheet_bytes(void)
+{
+    return sizeof(KhzSheet);
+}
+
+/* The numbers the compiler used, not the numbers a binding author guessed.
+   Phase 93 assumed 256 bytes for KhzFormula; on an LP64 build the struct is
+   two pointers, a size_t, two uint32_t and two uint64_t, and on an ILP32
+   build it is smaller again. Either way the managed side has no business
+   deriving it, so it asks. */
+size_t khz_abi_formula_bytes(void)
+{
+    return sizeof(KhzFormula);
+}
+
+size_t khz_abi_formula_node_bytes(void)
+{
+    return sizeof(KhzFormulaNode);
+}
+
 int khz_abi_simd_compiled(void)
 {
     return khz_simd_kernel() == KHZ_SIMD_SCALAR ? 0 : 1;
@@ -74,6 +100,11 @@ int khz_abi_ledger_compiled(void)
 }
 
 int khz_abi_xlsx_compiled(void)
+{
+    return 1;
+}
+
+int khz_abi_xlsx_reader_compiled(void)
 {
     return 1;
 }
