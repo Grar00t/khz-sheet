@@ -69,7 +69,7 @@ namespace KHZ.Sheet.Core
 		/// string is treated as absent rather than stored, because it could not
 		/// be parsed back into a number.
 		/// </summary>
-		public NumberNode(double value, string rawText)
+		public NumberNode(double value, string? rawText)
 		{
 			Value = value;
 			RawText = string.IsNullOrWhiteSpace(rawText) ? null : rawText;
@@ -84,8 +84,21 @@ namespace KHZ.Sheet.Core
 		/// <summary>
 		/// The literal exactly as it appeared in the formula, or null when this
 		/// node was built without it.
+		///
+		/// Nullable, deliberately, and not `required`. Null is the ordinary case
+		/// right now - FormulaParser.cs still uses the one-argument constructor
+		/// everywhere, so every node in a parsed tree has RawText null today.
+		/// Marking it required would force call sites to supply text that does
+		/// not exist yet and turn an accurate absence into a compile error.
+		///
+		/// Declaring it non-nullable was the actual bug (CS8618, CS8625,
+		/// CS8601): it told the compiler this can never be null while both
+		/// constructors can set it to null, which would have suppressed exactly
+		/// the null check the exact-rational path depends on. A consumer must
+		/// ask before reading, and `string?` is what makes the compiler enforce
+		/// that.
 		/// </summary>
-		public string RawText { get; }
+		public string? RawText { get; }
 
 		/// <summary>
 		/// True when the exact text is available, so a caller can convert to an
