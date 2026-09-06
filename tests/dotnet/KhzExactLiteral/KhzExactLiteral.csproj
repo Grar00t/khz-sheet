@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>KHZ.Sheet.Tests</RootNamespace>
+    <AssemblyName>KhzExactLiteral</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!--
+    The only project reference in the repository. The core library itself has
+    none, by rule; a test is the one place a reference is correct.
+
+    The native library is resolved by the loader at run time, not by MSBuild,
+    so LD_LIBRARY_PATH must point at the directory holding libkhz_sheet.so.
+    Built by the khz_sheet_shared target.
+
+    TreatWarningsAsErrors is on here and not on the core project on purpose:
+    this assembly is small and new, so there is no backlog to clear, and a
+    test that warns is a test nobody reads.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\KHZ.Sheet.Core\KHZ.Sheet.Core.csproj" />
+  </ItemGroup>
+
+</Project>
