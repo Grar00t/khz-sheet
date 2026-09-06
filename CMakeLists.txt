@@ -116,11 +116,13 @@ endif()
 # file left in the tree and produce duplicate symbols; an explicit list fails
 # loudly instead, which is the behaviour worth having.
 #
-# Two modules are split across multiple translation units, and in both cases
-# every half is required or the link fails:
-#   khz_formula.c        IR builder and parser
-#   khz_formula_eval.c   evaluator: a tree to a value
-#   khz_formula_deps.c   dependency declaration, setting, recalculation
+# Three modules are split across multiple translation units, and in every case
+# each half is required or the link fails:
+#   khz_sheet.c              sheet lifecycle, setters, aggregates, chain audit
+#   khz_sheet_selftest.c     the sheet layer's known-answer self-test
+#   khz_formula.c            IR builder and parser
+#   khz_formula_eval.c       evaluator: a tree to a value
+#   khz_formula_deps.c       dependency declaration, setting, recalculation
 #   khz_xlsx_reader.c        zip layer: central directory, DEFLATE, CRC-32
 #   khz_xlsx_reader_parse.c  XML layer: shared strings, worksheet to grid
 #
@@ -128,6 +130,11 @@ endif()
 # it does not produce a warning, it produces undefined references to
 # khz_formula_set, khz_formula_declare_dependencies and khz_formula_recalc,
 # all three of which the selftest calls.
+#
+# khz_sheet_selftest.c was split out of khz_sheet.c in Phase 98, so that a
+# change to the setters no longer means re-transmitting a 34 KB file. Omitting
+# it leaves khz_sheet_selftest undefined and the khz_selftest executable
+# below unlinkable.
 #
 # khz_inflate.c arrived in Phase 97 and the zip layer now calls into it, so
 # omitting it breaks the link rather than merely disabling a feature.
@@ -139,6 +146,7 @@ set(KHZ_SOURCES
     src/khz_grid.c
     src/khz_simd.c
     src/khz_sheet.c
+    src/khz_sheet_selftest.c
     src/khz_formula.c
     src/khz_formula_eval.c
     src/khz_formula_deps.c
