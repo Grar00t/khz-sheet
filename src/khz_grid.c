@@ -283,32 +283,18 @@ KhzSheetStatus khz_dep_init(KhzDepGraph *graph, KhzArena *arena, KhzGrid *grid)
     graph->heads = heads;
     graph->indegree = indegree;
     graph->capacity = capacity;
+    graph->ranges = NULL;
 
     return KHZ_SHEET_OK;
 }
 
-KhzSheetStatus khz_dep_add_edge(KhzDepGraph *graph,
-                               uint32_t from_col, uint32_t from_row,
-                               uint32_t to_col, uint32_t to_row)
+/* The single place an edge is recorded. Both the cell-to-cell path and the
+   range materialiser go through here, so indegree and edge_count cannot drift
+   apart depending on which entry point was used. */
+static KhzSheetStatus khz_dep_link(KhzDepGraph *graph, size_t from_index,
+                                   size_t to_index)
 {
-    size_t from_index;
-    size_t to_index;
     KhzDepEdge *edge;
-    KhzSheetStatus status;
-
-    if (graph == NULL || graph->grid == NULL || graph->heads == NULL) {
-        return KHZ_SHEET_ERR_NULL;
-    }
-
-    status = khz_grid_upsert(graph->grid, from_col, from_row, &from_index, NULL);
-    if (status != KHZ_SHEET_OK) {
-        return status;
-    }
-
-    status = khz_grid_upsert(graph->grid, to_col, to_row, &to_index, NULL);
-    if (status != KHZ_SHEET_OK) {
-        return status;
-    }
 
     if (from_index >= graph->capacity || to_index >= graph->capacity) {
         return KHZ_SHEET_ERR_LIMIT;
@@ -333,6 +319,142 @@ KhzSheetStatus khz_dep_add_edge(KhzDepGraph *graph,
     return KHZ_SHEET_OK;
 }
 
+KhzSheetStatus khz_dep_add_edge(KhzDepGraph *graph,
+                               uint32_t from_col, uint32_t from_row,
+                               uint32_t to_col, uint32_t to_row)
+{
+    size_t from_index;
+    size_t to_index;
+    KhzSheetStatus status;
+
+    if (graph == NULL || graph->grid == NULL || graph->heads == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    status = khz_grid_upsert(graph->grid, from_col, from_row, &from_index, NULL);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    status = khz_grid_upsert(graph->grid, to_col, to_row, &to_index, NULL);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    return khz_dep_link(graph, from_index, to_index);
+}
+
+int khz_dep_rect_contains(const KhzDepRect *rect, uint32_t col, uint32_t row)
+{
+    if (rect == NULL) {
+        return 0;
+    }
+
+    return (col >= rect->col1 && col <= rect->col2 &&
+            row >= rect->row1 && row <= rect->row2) ? 1 : 0;
+}
+
+/* Links every cell at or above `scanned` that falls inside one region, then
+   advances `scanned`. Split out so that a freshly declared region and a
+   later sync run identical code. */
+static KhzSheetStatus khz_dep_range_scan(KhzDepGraph *graph,
+                                         KhzDepRangeEdge *range)
+{
+    const KhzGrid *grid = graph->grid;
+    size_t i;
+
+    for (i = range->scanned; i < grid->cell_count; ++i) {
+        const KhzCell *cell = &grid->cells[i];
+
+        if (khz_dep_rect_contains(&range->rect, cell->col, cell->row) != 0) {
+            /* i == range->to is not filtered out. A formula inside the region
+               it reads is a circular reference, and khz_dep_topo must be the
+               one to say so. */
+            KhzSheetStatus status = khz_dep_link(graph, i, range->to);
+
+            if (status != KHZ_SHEET_OK) {
+                /* Stop at the failure rather than advancing scanned, so the
+                   unlinked tail is retried on the next sync instead of being
+                   skipped forever. */
+                range->scanned = i;
+                return status;
+            }
+
+            graph->range_links += (uint64_t)1;
+        }
+    }
+
+    range->scanned = grid->cell_count;
+    return KHZ_SHEET_OK;
+}
+
+KhzSheetStatus khz_dep_add_range_edge(KhzDepGraph *graph,
+                                     uint32_t col1, uint32_t row1,
+                                     uint32_t col2, uint32_t row2,
+                                     uint32_t to_col, uint32_t to_row)
+{
+    KhzDepRangeEdge *range;
+    size_t to_index;
+    KhzSheetStatus status;
+
+    if (graph == NULL || graph->grid == NULL || graph->heads == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    if (col1 >= KHZ_GRID_MAX_COLUMNS || col2 >= KHZ_GRID_MAX_COLUMNS ||
+        row1 >= KHZ_GRID_MAX_ROWS || row2 >= KHZ_GRID_MAX_ROWS) {
+        return KHZ_SHEET_ERR_LIMIT;
+    }
+
+    status = khz_grid_upsert(graph->grid, to_col, to_row, &to_index, NULL);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    range = (KhzDepRangeEdge *)khz_arena_alloc(graph->arena, sizeof *range);
+    if (range == NULL) {
+        return KHZ_SHEET_ERR_MEMORY;
+    }
+
+    /* Normalise the corners so containment is a plain pair of comparisons and
+       A3:C1 cannot describe an empty region by accident. */
+    range->rect.col1 = col1 < col2 ? col1 : col2;
+    range->rect.col2 = col1 < col2 ? col2 : col1;
+    range->rect.row1 = row1 < row2 ? row1 : row2;
+    range->rect.row2 = row1 < row2 ? row2 : row1;
+
+    range->to = to_index;
+    range->scanned = (size_t)0;
+    range->next = graph->ranges;
+    graph->ranges = range;
+    graph->range_count += (uint64_t)1;
+
+    /* Link what already exists. The region stays on the list either way, so a
+       failure here costs nothing permanently: the tail is retried next sync. */
+    return khz_dep_range_scan(graph, range);
+}
+
+KhzSheetStatus khz_dep_range_sync(KhzDepGraph *graph)
+{
+    KhzDepRangeEdge *range;
+
+    if (graph == NULL || graph->grid == NULL || graph->heads == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    for (range = graph->ranges; range != NULL; range = range->next) {
+        if (range->scanned < graph->grid->cell_count) {
+            KhzSheetStatus status = khz_dep_range_scan(graph, range);
+
+            if (status != KHZ_SHEET_OK) {
+                return status;
+            }
+        }
+    }
+
+    return KHZ_SHEET_OK;
+}
+
 KhzSheetStatus khz_dep_topo(KhzDepGraph *graph, size_t *order, size_t capacity,
                             size_t *count)
 {
@@ -348,6 +470,14 @@ KhzSheetStatus khz_dep_topo(KhzDepGraph *graph, size_t *order, size_t capacity,
 
     if (graph == NULL || graph->grid == NULL || order == NULL) {
         return KHZ_SHEET_ERR_NULL;
+    }
+
+    /* Regions are resolved before indegree is read, not after. pending[] below
+       is a snapshot, so a link materialised later in this call would not be
+       accounted for and the dependent cell would be emitted too early. */
+    status = khz_dep_range_sync(graph);
+    if (status != KHZ_SHEET_OK) {
+        return status;
     }
 
     used = graph->grid->cell_count;
@@ -415,4 +545,14 @@ KhzSheetStatus khz_dep_topo(KhzDepGraph *graph, size_t *order, size_t capacity,
 uint64_t khz_dep_edge_count(const KhzDepGraph *graph)
 {
     return graph == NULL ? (uint64_t)0 : graph->edge_count;
+}
+
+uint64_t khz_dep_range_count(const KhzDepGraph *graph)
+{
+    return graph == NULL ? (uint64_t)0 : graph->range_count;
+}
+
+uint64_t khz_dep_range_links(const KhzDepGraph *graph)
+{
+    return graph == NULL ? (uint64_t)0 : graph->range_links;
 }
