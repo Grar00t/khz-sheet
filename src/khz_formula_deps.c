@@ -8,7 +8,27 @@
    exist when the formula was declared, and the TODO block that used to sit in
    khz_declare_walk admitted the consequence: =SUM(A1:A100) never noticed a
    value typed into A50 afterwards. It now declares the rectangle itself and
-   lets khz_dep_range_sync link cells as they appear. */
+   lets khz_dep_range_sync link cells as they appear.
+
+   Phase 98 note on arena discipline, because this file got it wrong twice.
+
+   The dependency graph is permanent and the formula tree is scratch, but both
+   come out of one bump-pointer pool, and a release returns everything above a
+   mark. So any release taken around code that allocates an edge frees that
+   edge while the graph keeps pointing at it. Both mistakes below were exactly
+   that, and neither was visible until a second recalculation reused the
+   memory:
+
+     khz_formula_set    abandoned the parse tree after declaring dependencies,
+                        freeing the edges declared above the tree's mark
+     khz_formula_recalc took a mark, then let khz_dep_topo materialise range
+                        edges inside it, and released at the end
+
+   The real fix is for the graph to own a reserved pool of edges allocated once
+   in khz_dep_init, so khz_dep_link never calls the arena and no mark anywhere
+   can reach an edge. That changes KhzDepGraph and requires an ABI bump, so it
+   is deferred to its own phase. Until then: do not wrap an arena mark around
+   anything that can declare a dependency. */
 
 #include "khz_formula.h"
 
@@ -136,7 +156,9 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
     }
 
     /* Parse before touching the sheet. A formula that does not parse must leave
-       no cell, no edge and no chain entry behind. */
+       no cell, no edge and no chain entry behind. khz_formula_parse abandons
+       its own tree on a parse failure, and nothing has been declared at that
+       point, so that path is still clean. */
     status = khz_formula_parse(&formula, arena, col, row, source, len, error);
     if (status != KHZ_SHEET_OK) {
         return status;
@@ -144,15 +166,26 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
 
     status = khz_formula_declare_dependencies(sheet, &formula, NULL);
 
-    /* The tree is scratch: the cell stores the source text and recalculation
-       reparses it. Releasing here returns every node to the arena before the
-       text is copied in below, so a sheet of formulas costs source bytes and
-       not tree bytes.
+    /* The tree is deliberately NOT abandoned here.
 
-       Note that a range edge is not scratch and outlives this release: it is
-       allocated permanently by khz_dep_add_range_edge, exactly like the
-       concrete edges a REF declares, and is not part of the formula tree. */
-    khz_formula_abandon(&formula);
+       It used to be, and that was the Phase 96 defect this push exists to fix.
+       khz_formula_begin takes an arena mark before the first node is
+       allocated; khz_formula_declare_dependencies then allocates the range
+       record and every concrete edge above that mark. Abandoning released the
+       tree and the graph together, and khz_sheet_set_formula below promptly
+       copied the source text over the freed edges. graph->heads pointed into
+       reusable arena space from that moment on.
+
+       A bump allocator with LIFO release cannot free the earlier region and
+       keep the later one, so the tree stays. The cost is honest and it is a
+       regression: installing a formula now retains its parse tree as well as
+       its source text, so a sheet of formulas no longer costs source bytes
+       alone. Reclaiming it requires the graph to allocate edges from its own
+       reserved pool rather than from the shared bump region, which changes
+       KhzDepGraph and is deferred to its own phase.
+
+       Keeping a dangling graph would be the cheaper option in bytes and the
+       wrong one in every other respect. */
 
     if (status != KHZ_SHEET_OK) {
         return status;
@@ -173,7 +206,13 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
    This reads graph->heads, so it only sees regions that have already been
    materialised into concrete edges. That is why khz_dep_range_scan marks the
    dependent dirty itself at the moment it creates a link: a cell written into
-   a region before the next sync would otherwise be invisible here. */
+   a region before the next sync would otherwise be invisible here.
+
+   Phase 98: this is still static and still called from one place, which is a
+   known defect. A plain value write through khz_sheet_set_i64 and friends
+   propagates nothing, so a formula reading an edited input keeps its cached
+   value and the dirty-only skip below never recomputes it. Fixing that means
+   exporting this and calling it from the setters in khz_sheet.c. */
 static void khz_dirty_dependents(KhzSheet *sheet, size_t index)
 {
     const KhzDepEdge *edge;
@@ -247,6 +286,32 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         return KHZ_SHEET_OK;
     }
 
+    /* Materialise declared regions BEFORE the mark is taken.
+
+       khz_dep_topo syncs ranges too, and until Phase 98 that was the only
+       place it happened - inside the mark taken below, so every edge the sync
+       created was freed by the release at the end of this function. The graph
+       then held a head pointer into reusable scratch space, and the next call
+       walked it. That is the =SUM(A1:A100) case Phase 96 was written for:
+       typing into A50 produced an edge that the very recalculation which
+       created it destroyed.
+
+       Doing it here means the sync inside khz_dep_topo finds
+       scanned == cell_count and allocates nothing, so nothing permanent is
+       created inside the released window. The inner call is left in place
+       rather than removed: it is what guarantees regions are resolved before
+       indegree is read, and it is now a cheap no-op. */
+    status = khz_dep_range_sync(&sheet->deps);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    /* Re-read after the sync. khz_dep_range_scan upserts nothing, but
+       khz_dep_add_range_edge did upsert the dependent when the region was
+       declared, and reading the count once the graph is settled keeps order[]
+       sized for what khz_dep_topo will actually emit. */
+    capacity = khz_sheet_cell_count(sheet);
+
     mark = khz_arena_mark(arena);
 
     order = (size_t *)khz_arena_alloc(arena, capacity * sizeof(size_t));
@@ -255,13 +320,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         return KHZ_SHEET_ERR_MEMORY;
     }
 
-    /* This is also where declared regions are resolved: khz_sheet_evaluation_order
-       calls khz_dep_topo, which syncs range edges before it reads indegree.
-       Any cell created inside a declared region since the last recalc is
-       linked and marked dirty by that sync, so it is both ordered correctly
-       and actually recomputed on this call rather than a later one.
-
-       KHZ_SHEET_ERR_CYCLE propagates unchanged. A circular reference is not
+    /* KHZ_SHEET_ERR_CYCLE propagates unchanged. A circular reference is not
        evaluated partially and is not reported as a value; nothing is written. */
     status = khz_sheet_evaluation_order(sheet, order, capacity, &count);
     if (status != KHZ_SHEET_OK) {
@@ -288,11 +347,19 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
         /* Clean cells are skipped. Their cached value is current by
            construction: it was computed after the last change to anything
-           they read, which is exactly what clearing the flag recorded. */
+           they read, which is exactly what clearing the flag recorded.
+
+           That reasoning holds only while something sets the flag when an
+           input changes. Today nothing does for a plain value write, so this
+           skip can return a stale value. See khz_dirty_dependents above. */
         if ((cell->flags & (uint32_t)KHZ_CELL_FLAG_DIRTY) == 0u) {
             continue;
         }
 
+        /* Recalculation reparses the stored source and abandons the tree it
+           builds. That abandon is safe where the one in khz_formula_set was
+           not, because nothing here declares a dependency: the tree really is
+           the only thing allocated above its own mark. */
         status = khz_formula_parse(&formula, arena, cell->col, cell->row,
                                    cell->formula, (size_t)cell->formula_len, NULL);
         if (status != KHZ_SHEET_OK) {
