@@ -18,6 +18,12 @@ namespace KHZ.Sheet.Tests
 	/// recalculation, and the proof chain over a computed rather than assigned
 	/// value.
 	///
+	/// Note on types: a cell exposes its value as KhzRationalNative, whose
+	/// fields are Num and Den, while a formula result exposes KhzRational,
+	/// whose fields are Numerator and Denominator. Same C struct, two managed
+	/// mirrors, different member names. That inconsistency cost this file one
+	/// failed build.
+	///
 	/// Exits non-zero on failure.
 	/// </summary>
 	internal static class Program
@@ -159,7 +165,7 @@ namespace KHZ.Sheet.Tests
 					+ ", dirty = " + cell.IsDirty
 					+ ", revision = " + cell.Revision);
 
-				Expect(cell.Value.Numerator == 30L && cell.Value.Denominator == 1L,
+				Expect(cell.Value.Num == 30L && cell.Value.Den == 1L,
 					"B1 = " + cell.Value + ", expected 30/1");
 
 				Expect(cell.IsCommitted, "B1 committed onto the chain");
@@ -185,7 +191,7 @@ namespace KHZ.Sheet.Tests
 
 				if (sheet.TryGetCell(1u, 0u, out cell) == SheetStatus.Ok)
 				{
-					Expect(cell.Value.Numerator == 35L && cell.Value.Denominator == 1L,
+					Expect(cell.Value.Num == 35L && cell.Value.Den == 1L,
 						"B1 = " + cell.Value + " after A1 = 15, expected 35/1");
 				}
 				else
