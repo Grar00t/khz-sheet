@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace KHZ.Sheet.Core
 {
@@ -70,15 +71,93 @@ namespace KHZ.Sheet.Core
 		internal const string Lib = "khz_sheet";
 
 		/// <summary>
-		/// KhzFormula is treated as an opaque block rather than mirrored field by
-		/// field. Its real size is seven words; 256 bytes is a deliberate
-		/// over-allocation so a field added on the C side cannot silently
-		/// corrupt the stack here. KhzAbiSizes does not yet publish
-		/// sizeof(KhzFormula) - adding khz_abi_formula_bytes() and asserting
-		/// against it is Phase 94 work, and until then this number is the one
-		/// unverified layout assumption in this file.
+		/// Size of the stack window reserved for a KhzFormula control block.
+		///
+		/// This is not a claim about sizeof(KhzFormula). It is the amount of
+		/// stack this file is willing to set aside, and it exists only because
+		/// stackalloc needs a size before the native size can be queried. The
+		/// real size comes from khz_abi_formula_bytes() and is checked against
+		/// this window before anything is written into it.
 		/// </summary>
-		internal const int FormulaBlockBytes = 256;
+		internal const int StackBlockBytes = 512;
+
+		private static int cachedFormulaBytes;
+
+		[DllImport(Lib, EntryPoint = "khz_abi_formula_bytes", CallingConvention = CallingConvention.Cdecl)]
+		private static extern nuint AbiFormulaBytes();
+
+		[DllImport(Lib, EntryPoint = "khz_abi_formula_node_bytes", CallingConvention = CallingConvention.Cdecl)]
+		private static extern nuint AbiFormulaNodeBytes();
+
+		/// <summary>sizeof(KhzFormulaNode) as compiled. Diagnostic only.</summary>
+		internal static ulong NodeBytes()
+		{
+			return (ulong)AbiFormulaNodeBytes();
+		}
+
+		/// <summary>
+		/// Resolves sizeof(KhzFormula) from the loaded library and confirms it
+		/// fits the reserved stack window.
+		///
+		/// Phase 93 hardcoded 256 bytes here and hoped. That was a single
+		/// assumption standing in for pointer width, size_t width and struct
+		/// padding, and if the native struct had been larger the builder would
+		/// have written past the block and corrupted the stack with nothing
+		/// reporting it. The number is now the compiler's, and a struct that
+		/// outgrows the window is a returned status rather than a silent
+		/// overwrite.
+		/// </summary>
+		internal static SheetStatus EnsureBlockSize(out int bytes)
+		{
+			int cached = Volatile.Read(ref cachedFormulaBytes);
+
+			if (cached > 0)
+			{
+				bytes = cached;
+				return SheetStatus.Ok;
+			}
+
+			bytes = 0;
+
+			ulong reported;
+
+			try
+			{
+				reported = (ulong)AbiFormulaBytes();
+			}
+			catch (DllNotFoundException)
+			{
+				/* The native library is genuinely absent. That is an environment
+				   failure rather than an expected formula outcome, so it is one of
+				   the few places an exception is allowed to be caught and turned
+				   into a status instead of propagating. */
+				return SheetStatus.ErrState;
+			}
+			catch (EntryPointNotFoundException)
+			{
+				/* An older library without the Phase 94 ABI queries. Refusing is
+				   correct: falling back to 256 would reinstate exactly the
+				   assumption this method exists to remove. */
+				return SheetStatus.ErrUnsupported;
+			}
+
+			if (reported == 0UL)
+			{
+				return SheetStatus.ErrState;
+			}
+			if (reported > (ulong)StackBlockBytes)
+			{
+				/* KhzFormula outgrew the reserved window. Raising StackBlockBytes
+				   and rebuilding is the fix; guessing is not. */
+				return SheetStatus.ErrLimit;
+			}
+
+			cached = (int)reported;
+			Volatile.Write(ref cachedFormulaBytes, cached);
+
+			bytes = cached;
+			return SheetStatus.Ok;
+		}
 
 		[DllImport(Lib, EntryPoint = "khz_formula_begin", CallingConvention = CallingConvention.Cdecl)]
 		internal static extern int Begin(byte* formula, IntPtr arena, uint col, uint row);
@@ -133,6 +212,21 @@ namespace KHZ.Sheet.Core
 	public static unsafe class KhzFormula
 	{
 		/// <summary>
+		/// sizeof(KhzFormula) as reported by the loaded library, or zero when it
+		/// could not be resolved. Exposed so a caller can log what it bound to.
+		/// </summary>
+		public static ulong NativeFormulaBytes
+		{
+			get
+			{
+				int bytes;
+				return KhzNativeFormula.EnsureBlockSize(out bytes) == SheetStatus.Ok
+					? (ulong)bytes
+					: 0UL;
+			}
+		}
+
+		/// <summary>
 		/// Parses and installs a formula from its source text, letting the C
 		/// parser do the work. This is the preferred path: the text is the only
 		/// representation both layers agree on exactly.
@@ -168,7 +262,7 @@ namespace KHZ.Sheet.Core
 			return (SheetStatus)status;
 		}
 
-		/// <summary>Recalculates every formula cell in topological order.</summary>
+		/// <summary>Recalculates the formula cells that are marked dirty.</summary>
 		public static SheetStatus Recalculate(IntPtr sheet, out ulong evaluated)
 		{
 			ulong count = 0UL;
@@ -207,8 +301,16 @@ namespace KHZ.Sheet.Core
 				return SheetStatus.ErrNull;
 			}
 
-			byte* block = stackalloc byte[KhzNativeFormula.FormulaBlockBytes];
-			new Span<byte>(block, KhzNativeFormula.FormulaBlockBytes).Clear();
+			int blockBytes;
+			SheetStatus sized = KhzNativeFormula.EnsureBlockSize(out blockBytes);
+
+			if (sized != SheetStatus.Ok)
+			{
+				return sized;
+			}
+
+			byte* block = stackalloc byte[KhzNativeFormula.StackBlockBytes];
+			new Span<byte>(block, KhzNativeFormula.StackBlockBytes).Clear();
 
 			int status = KhzNativeFormula.Begin(block, arena, col, row);
 			if (status != 0)
@@ -257,8 +359,16 @@ namespace KHZ.Sheet.Core
 				return SheetStatus.ErrNull;
 			}
 
-			byte* block = stackalloc byte[KhzNativeFormula.FormulaBlockBytes];
-			new Span<byte>(block, KhzNativeFormula.FormulaBlockBytes).Clear();
+			int blockBytes;
+			SheetStatus sized = KhzNativeFormula.EnsureBlockSize(out blockBytes);
+
+			if (sized != SheetStatus.Ok)
+			{
+				return sized;
+			}
+
+			byte* block = stackalloc byte[KhzNativeFormula.StackBlockBytes];
+			new Span<byte>(block, KhzNativeFormula.StackBlockBytes).Clear();
 
 			int status = KhzNativeFormula.Begin(block, arena, col, row);
 			if (status != 0)
@@ -350,8 +460,8 @@ namespace KHZ.Sheet.Core
 		///
 		/// This is a repair, not a design. The real fix is for FormulaLexer to
 		/// keep the literal text and hand it to the C parser, which already
-		/// converts digits to a rational without a float in the path. Recorded as
-		/// Phase 94 work; until then, prefer SetFormula over lowering a tree.
+		/// converts digits to a rational without a float in the path. Still
+		/// outstanding; until then, prefer SetFormula over lowering a tree.
 		/// </summary>
 		private static SheetStatus LowerNumber(byte* block, double value, ref IntPtr result)
 		{
