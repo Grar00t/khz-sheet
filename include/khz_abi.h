@@ -17,16 +17,24 @@ extern "C" {
    turned into a status code instead.
 
    Held at 91 through Phase 92 and Phase 93 because those phases added
-   functions, not struct members. Phase 94 is different: KhzSheet gained a
-   KhzCommitLog member, which moves proof, commits and initialised and changes
-   sizeof(KhzSheet). That is exactly the event this constant exists to
-   announce, so it is now 94.
+   functions, not struct members. Phase 94 bumped it to 94: KhzSheet gained a
+   KhzCommitLog member, which moved proof, commits and initialised and changed
+   sizeof(KhzSheet).
 
-   KhzAbiSizes itself is deliberately unchanged. The two new formula queries
-   below are free functions rather than new struct members, so a managed
-   mirror of KhzAbiSizes compiled against 91 still reads the right fields at
-   the right offsets and only has to accept the new version number. */
-#define KHZ_ABI_VERSION ((uint32_t)94)
+   Phase 96 is the same kind of event and is now 95. KhzDepGraph gained three
+   members - the declared-region list head, the region count and the count of
+   concrete edges materialised from regions - so sizeof(KhzDepGraph) changed.
+   KhzDepGraph sits inside KhzSheet ahead of the commit log and the proof, so
+   this also moved every KhzSheet member after it. Any caller that hardcoded
+   those offsets instead of asking khz_abi_*_offset() is now wrong, which is
+   precisely what this constant is for.
+
+   KhzAbiSizes itself remains unchanged in layout. dep_graph_bytes is an
+   existing field and simply reports a larger number now; the new range-edge
+   query below is a free function, not a new struct member, so a managed
+   mirror compiled against 91 still reads the right fields at the right
+   offsets and only has to widen the version it accepts. */
+#define KHZ_ABI_VERSION ((uint32_t)95)
 
 typedef struct KhzAbiSizes {
     uint32_t version;
@@ -63,8 +71,9 @@ uint32_t khz_abi_version(void);
    depends on sizeof(KhzArena), which contains atomics whose size and
    alignment are the compiler's business, not the binding author's. Guessing it
    would produce a pointer that is wrong by a few bytes and corrupt the grid
-   silently. Phase 94 is the proof of that argument - inserting the commit log
-   moved proof, and every caller that resolves it through this function is
+   silently. Phases 94 and 96 are both proof of that argument - inserting the
+   commit log moved proof, growing the dependency graph moved everything after
+   it, and every caller that resolves offsets through these functions is
    already correct without being recompiled.
 
    A C caller does not need any of this - KhzSheet is a complete type in
@@ -79,6 +88,17 @@ size_t khz_abi_commit_log_offset(void);
 /* sizeof(KhzSheet), so a managed caller can allocate a sheet control block
    without mirroring the struct at all. */
 size_t khz_abi_sheet_bytes(void);
+
+/* sizeof(KhzDepEdge) and sizeof(KhzDepRangeEdge), reported by the compiler.
+
+   A range edge is strictly larger than a cell edge: it carries a four-field
+   rectangle and a scan watermark on top of the target index and the list
+   link. The managed side does not allocate either of these - the arena does -
+   so these are here for the version gate to assert against rather than for
+   allocation. If a future phase changes the rectangle representation without
+   bumping KHZ_ABI_VERSION, a gate that checks this number will catch it. */
+size_t khz_abi_dep_edge_bytes(void);
+size_t khz_abi_dep_range_edge_bytes(void);
 
 /* sizeof(KhzFormula) and sizeof(KhzFormulaNode), reported by the compiler.
 
@@ -108,6 +128,10 @@ int khz_abi_xlsx_compiled(void);
 
 /* 1 when this build contains the xlsx reader. */
 int khz_abi_xlsx_reader_compiled(void);
+
+/* 1 when this build resolves range references as retroactive region edges
+   rather than as one edge per cell that existed at declaration time. */
+int khz_abi_range_edges_compiled(void);
 
 #ifdef __cplusplus
 }
