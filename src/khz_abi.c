@@ -25,6 +25,8 @@ KhzSheetStatus khz_abi_sizes(KhzAbiSizes *out)
     out->cell_bytes = (uint32_t)sizeof(KhzCell);
     out->grid_slot_bytes = (uint32_t)sizeof(KhzGridSlot);
     out->grid_bytes = (uint32_t)sizeof(KhzGrid);
+    /* Larger as of Phase 96: KhzDepGraph now carries the declared-region list
+       head and two counters. The field is not new, the number is. */
     out->dep_graph_bytes = (uint32_t)sizeof(KhzDepGraph);
     out->sheet_bytes = (uint32_t)sizeof(KhzSheet);
     out->ledger_bytes = (uint32_t)sizeof(KhzLedger);
@@ -55,6 +57,9 @@ size_t khz_abi_dep_graph_offset(void)
     return offsetof(KhzSheet, deps);
 }
 
+/* Both of these moved in Phase 96, because deps grew and sits ahead of them.
+   Nothing here needed changing for that to be reported correctly, which is
+   the entire argument for asking the compiler instead of hardcoding. */
 size_t khz_abi_proof_offset(void)
 {
     return offsetof(KhzSheet, proof);
@@ -68,6 +73,16 @@ size_t khz_abi_commit_log_offset(void)
 size_t khz_abi_sheet_bytes(void)
 {
     return sizeof(KhzSheet);
+}
+
+size_t khz_abi_dep_edge_bytes(void)
+{
+    return sizeof(KhzDepEdge);
+}
+
+size_t khz_abi_dep_range_edge_bytes(void)
+{
+    return sizeof(KhzDepRangeEdge);
 }
 
 /* The numbers the compiler used, not the numbers a binding author guessed.
@@ -105,6 +120,11 @@ int khz_abi_xlsx_compiled(void)
 }
 
 int khz_abi_xlsx_reader_compiled(void)
+{
+    return 1;
+}
+
+int khz_abi_range_edges_compiled(void)
 {
     return 1;
 }
