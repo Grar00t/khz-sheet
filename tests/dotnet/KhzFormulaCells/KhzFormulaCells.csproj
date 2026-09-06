@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>KHZ.Sheet.Tests</RootNamespace>
+    <AssemblyName>KhzFormulaCells</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!--
+    Same shape as KhzExactLiteral. The native library is resolved by the
+    loader at run time, so LD_LIBRARY_PATH must point at the directory
+    holding libkhz_sheet.so, built by the khz_sheet_shared target.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\KHZ.Sheet.Core\KHZ.Sheet.Core.csproj" />
+  </ItemGroup>
+
+</Project>
