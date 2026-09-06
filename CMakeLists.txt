@@ -14,12 +14,14 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(KHZ_ENABLE_AVX2 "Compile the AVX2 SIMD kernel" ON)
+option(KHZ_ENABLE_LEDGER "Compile the SQLite proof-chain ledger" ON)
 option(KHZ_BUILD_SELFTEST "Build the self-test executable" ON)
+option(KHZ_BUILD_SHARED "Build the shared library used by the C# bindings" ON)
 
 # Sources are listed, not globbed. A glob would silently pick up any stray .c
 # file left in the tree and produce duplicate symbols; an explicit list fails
 # loudly instead, which is the behaviour worth having.
-add_library(khz_sheet STATIC
+set(KHZ_SOURCES
     src/khz_arena.c
     src/khz_hash.c
     src/khz_rational.c
@@ -27,16 +29,25 @@ add_library(khz_sheet STATIC
     src/khz_grid.c
     src/khz_simd.c
     src/khz_sheet.c
+    src/khz_ledger.c
+    src/khz_abi.c
 )
 
-target_include_directories(khz_sheet PUBLIC
+# One object library compiled once, then wrapped as both a static archive and a
+# shared object. The C# bindings need a shared library to P/Invoke into; the
+# static archive is what a C consumer wants. Compiling the sources twice would
+# let the two drift apart under different flags.
+add_library(khz_sheet_objects OBJECT ${KHZ_SOURCES})
+set_target_properties(khz_sheet_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+target_include_directories(khz_sheet_objects PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(khz_sheet PRIVATE -Wall -Wextra -Wshadow -Wvla)
-    target_compile_options(khz_sheet PRIVATE $<$<CONFIG:Release>:-O3>)
+    target_compile_options(khz_sheet_objects PRIVATE -Wall -Wextra -Wshadow -Wvla)
+    target_compile_options(khz_sheet_objects PRIVATE $<$<CONFIG:Release>:-O3>)
 endif()
 
 # -mavx2 is only applied when the compiler actually accepts it. Forcing it
@@ -47,34 +58,78 @@ include(CheckCCompilerFlag)
 check_c_compiler_flag("-mavx2" KHZ_COMPILER_ACCEPTS_MAVX2)
 
 if(KHZ_ENABLE_AVX2 AND KHZ_COMPILER_ACCEPTS_MAVX2)
-    target_compile_options(khz_sheet PRIVATE -mavx2)
+    target_compile_options(khz_sheet_objects PRIVATE -mavx2)
     message(STATUS "khz_sheet: AVX2 kernel enabled (-mavx2)")
 else()
     message(STATUS "khz_sheet: AVX2 kernel not enabled; NEON or scalar kernel will be used")
 endif()
 
-# sqlite3 is the one permitted external dependency and is expected to come from
-# the system, never vendored and never fetched. Nothing links it yet: the
-# ledger adapter is Phase 91, so declaring the link now would be a dependency
-# on code that does not exist.
-find_path(KHZ_SQLITE3_INCLUDE_DIR sqlite3.h)
-find_library(KHZ_SQLITE3_LIBRARY NAMES sqlite3)
+# sqlite3 is the one permitted external dependency and must come from the
+# system: never vendored, never fetched. When the ledger is requested and
+# sqlite3 is absent, configuration fails loudly rather than quietly producing a
+# library whose ledger silently refuses every call.
+set(KHZ_LEDGER_ACTIVE OFF)
 
-if(KHZ_SQLITE3_INCLUDE_DIR AND KHZ_SQLITE3_LIBRARY)
-    message(STATUS "khz_sheet: system sqlite3 found, will be linked by the Phase 91 ledger")
+if(KHZ_ENABLE_LEDGER)
+    find_path(KHZ_SQLITE3_INCLUDE_DIR sqlite3.h)
+    find_library(KHZ_SQLITE3_LIBRARY NAMES sqlite3)
+
+    if(KHZ_SQLITE3_INCLUDE_DIR AND KHZ_SQLITE3_LIBRARY)
+        set(KHZ_LEDGER_ACTIVE ON)
+        target_include_directories(khz_sheet_objects PRIVATE ${KHZ_SQLITE3_INCLUDE_DIR})
+        target_compile_definitions(khz_sheet_objects PRIVATE KHZ_WITH_SQLITE=1)
+        message(STATUS "khz_sheet: ledger enabled against ${KHZ_SQLITE3_LIBRARY}")
+    else()
+        message(FATAL_ERROR
+            "KHZ_ENABLE_LEDGER is ON but system sqlite3 was not found. "
+            "Install the sqlite3 development package, or configure with "
+            "-DKHZ_ENABLE_LEDGER=OFF to build without the ledger.")
+    endif()
 else()
-    message(STATUS "khz_sheet: system sqlite3 not found; required only by the Phase 91 ledger")
+    message(STATUS "khz_sheet: ledger disabled; khz_ledger_* will return ERR_UNSUPPORTED")
+endif()
+
+add_library(khz_sheet STATIC $<TARGET_OBJECTS:khz_sheet_objects>)
+target_include_directories(khz_sheet PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+if(KHZ_LEDGER_ACTIVE)
+    target_link_libraries(khz_sheet PUBLIC ${KHZ_SQLITE3_LIBRARY})
+endif()
+
+if(KHZ_BUILD_SHARED)
+    add_library(khz_sheet_shared SHARED $<TARGET_OBJECTS:khz_sheet_objects>)
+
+    # The C# side loads "khz_sheet", so both artefacts carry that base name.
+    set_target_properties(khz_sheet_shared PROPERTIES OUTPUT_NAME khz_sheet)
+
+    target_include_directories(khz_sheet_shared PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
+
+    if(KHZ_LEDGER_ACTIVE)
+        target_link_libraries(khz_sheet_shared PUBLIC ${KHZ_SQLITE3_LIBRARY})
+    endif()
 endif()
 
 if(KHZ_BUILD_SELFTEST)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/khz_selftest_main.c"
 "#include <stdio.h>\n"
+"#include \"khz_abi.h\"\n"
+"#include \"khz_ledger.h\"\n"
 "#include \"khz_sheet.h\"\n"
 "int main(void)\n"
 "{\n"
 "    int failures = khz_sheet_selftest();\n"
-"    printf(\"kernel=%s lanes=%zu failures=%d\\n\",\n"
-"           khz_simd_kernel_name(khz_simd_kernel()), khz_simd_lanes(), failures);\n"
+"    printf(\"abi=%u kernel=%s lanes=%zu ledger=%d failures=%d\\n\",\n"
+"           khz_abi_version(),\n"
+"           khz_simd_kernel_name(khz_simd_kernel()),\n"
+"           khz_simd_lanes(),\n"
+"           khz_ledger_available(),\n"
+"           failures);\n"
 "    return failures == 0 ? 0 : 1;\n"
 "}\n")
 
