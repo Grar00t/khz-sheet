@@ -16,12 +16,17 @@ extern "C" {
    quietly. This header exists so the mismatch is detected at load time and
    turned into a status code instead.
 
-   Still 91 in Phase 92 on purpose. The offset queries added below are new
-   functions, not new struct members, so KhzAbiSizes has exactly the layout it
-   had in Phase 91 and every binding compiled against 91 remains correct. A
-   version bump here would have forced a rewrite of the managed mirror for no
-   layout change at all. */
-#define KHZ_ABI_VERSION ((uint32_t)91)
+   Held at 91 through Phase 92 and Phase 93 because those phases added
+   functions, not struct members. Phase 94 is different: KhzSheet gained a
+   KhzCommitLog member, which moves proof, commits and initialised and changes
+   sizeof(KhzSheet). That is exactly the event this constant exists to
+   announce, so it is now 94.
+
+   KhzAbiSizes itself is deliberately unchanged. The two new formula queries
+   below are free functions rather than new struct members, so a managed
+   mirror of KhzAbiSizes compiled against 91 still reads the right fields at
+   the right offsets and only has to accept the new version number. */
+#define KHZ_ABI_VERSION ((uint32_t)94)
 
 typedef struct KhzAbiSizes {
     uint32_t version;
@@ -58,7 +63,9 @@ uint32_t khz_abi_version(void);
    depends on sizeof(KhzArena), which contains atomics whose size and
    alignment are the compiler's business, not the binding author's. Guessing it
    would produce a pointer that is wrong by a few bytes and corrupt the grid
-   silently.
+   silently. Phase 94 is the proof of that argument - inserting the commit log
+   moved proof, and every caller that resolves it through this function is
+   already correct without being recompiled.
 
    A C caller does not need any of this - KhzSheet is a complete type in
    khz_sheet.h, so &sheet->grid is already available and is the right way to
@@ -67,6 +74,24 @@ size_t khz_abi_arena_offset(void);
 size_t khz_abi_grid_offset(void);
 size_t khz_abi_dep_graph_offset(void);
 size_t khz_abi_proof_offset(void);
+size_t khz_abi_commit_log_offset(void);
+
+/* sizeof(KhzSheet), so a managed caller can allocate a sheet control block
+   without mirroring the struct at all. */
+size_t khz_abi_sheet_bytes(void);
+
+/* sizeof(KhzFormula) and sizeof(KhzFormulaNode), reported by the compiler.
+
+   KhzFormula is opaque to the managed side: it holds an arena pointer, a
+   root pointer, an arena mark and counters, and the managed lowerer only ever
+   passes it back and forth. Phase 93 allocated a fixed 256-byte block for it
+   and hoped, which is a guess about pointer size, size_t width and struct
+   padding all at once. If the real struct were larger, the builder would
+   write past the block and corrupt whatever followed it, and nothing would
+   report it. These functions replace the guess with the number the compiler
+   used. */
+size_t khz_abi_formula_bytes(void);
+size_t khz_abi_formula_node_bytes(void);
 
 /* 1 when the library was built with the AVX2 or NEON kernel compiled in, 0
    for the scalar build. Reported rather than inferred from the host CPU: what
@@ -80,6 +105,9 @@ int khz_abi_ledger_compiled(void);
 
 /* 1 when this build contains the xlsx writer. */
 int khz_abi_xlsx_compiled(void);
+
+/* 1 when this build contains the xlsx reader. */
+int khz_abi_xlsx_reader_compiled(void);
 
 #ifdef __cplusplus
 }
