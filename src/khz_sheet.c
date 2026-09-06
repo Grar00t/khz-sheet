@@ -31,6 +31,8 @@ const char *khz_sheet_status_name(KhzSheetStatus status)
             return "ERR_CYCLE";
         case KHZ_SHEET_ERR_TYPE:
             return "ERR_TYPE";
+        case KHZ_SHEET_ERR_OS:
+            return "ERR_OS";
         default:
             return "ERR_UNKNOWN";
     }

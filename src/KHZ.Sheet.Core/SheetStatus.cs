@@ -52,6 +52,8 @@ namespace KHZ.Sheet.Core
 
 		/// <summary>A cell held a kind this operation cannot consume.</summary>
 		ErrType = -12,
+
+		ErrOs = -13,
 	}
 
 	/// <summary>Names for status codes, so logs never print a bare integer.</summary>
@@ -87,6 +89,8 @@ namespace KHZ.Sheet.Core
 					return "ERR_CYCLE";
 				case SheetStatus.ErrType:
 					return "ERR_TYPE";
+				case SheetStatus.ErrOs:
+					return "ERR_OS";
 				default:
 					return "ERR_UNKNOWN";
 			}

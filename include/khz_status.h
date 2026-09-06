@@ -25,7 +25,8 @@ typedef enum KhzSheetStatus {
     KHZ_SHEET_ERR_STATE       =  -9,
     KHZ_SHEET_ERR_MEMORY      = -10,
     KHZ_SHEET_ERR_CYCLE       = -11,
-    KHZ_SHEET_ERR_TYPE        = -12
+    KHZ_SHEET_ERR_TYPE        = -12,
+    KHZ_SHEET_ERR_OS          = -13
 } KhzSheetStatus;
 
 /* Never returns NULL. An unmapped value yields "ERR_UNKNOWN" rather than a
