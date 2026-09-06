@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -418,7 +419,9 @@ namespace KHZ.Sheet.Core
 			switch (node)
 			{
 				case NumberNode number:
-					return LowerNumber(block, number.Value, ref result);
+					/* The node is passed whole, not just its double, so the exact
+					   literal text can be used when it is present. */
+					return LowerNumber(block, number, ref result);
 
 				case GroupNode group:
 					/* Parentheses are a text artefact; the tree already has the
@@ -450,21 +453,310 @@ namespace KHZ.Sheet.Core
 		}
 
 		/// <summary>
-		/// Converts a managed double literal to an exact rational.
+		/// Lowers a numeric literal to an exact rational constant.
 		///
-		/// The managed lexer stores literals as double, so 0.1 has already been
-		/// rounded before this method sees it. Casting the binary value directly
-		/// would yield 3602879701896397/36028797018963968 - exact, but not the
-		/// number the user typed. Going through decimal recovers the shortest
-		/// round-trippable decimal instead, so 0.1 becomes 1/10.
+		/// Two paths, and which one is taken depends only on whether the node
+		/// carries its source text:
 		///
-		/// This is a repair, not a design. The real fix is for FormulaLexer to
-		/// keep the literal text and hand it to the C parser, which already
-		/// converts digits to a rational without a float in the path. Still
-		/// outstanding; until then, prefer SetFormula over lowering a tree.
+		/// With RawText, the digits are converted straight to num/den and no
+		/// double is consulted. This is the correct path and, since Push H, the
+		/// one every parsed formula takes.
+		///
+		/// Without it, FromDouble reconstructs a rational from the double. That
+		/// is a repair for information already lost, kept only because the
+		/// one-argument NumberNode constructor still exists and a caller
+		/// building a tree by hand may use it.
 		/// </summary>
-		private static SheetStatus LowerNumber(byte* block, double value, ref IntPtr result)
+		private static SheetStatus LowerNumber(byte* block, NumberNode number, ref IntPtr result)
 		{
+			if (number == null)
+			{
+				return SheetStatus.ErrNull;
+			}
+
+			KhzRational rational;
+
+			/* Bound to a local so the null check is one the compiler can follow,
+			   and so the value cannot change between the test and the use. */
+			string? raw = number.RawText;
+
+			if (raw != null)
+			{
+				SheetStatus exact = TryExactRational(raw, out rational);
+
+				if (exact != SheetStatus.Ok)
+				{
+					/* No silent fall back to the double path. A literal that has
+					   no exact int64 rational is refused; approximating it here
+					   would defeat the entire point of carrying the text. */
+					return exact;
+				}
+			}
+			else
+			{
+				SheetStatus repaired = FromDouble(number.Value, out rational);
+
+				if (repaired != SheetStatus.Ok)
+				{
+					return repaired;
+				}
+			}
+
+			IntPtr node = IntPtr.Zero;
+			int status = KhzNativeFormula.Const(block, rational, &node);
+
+			if (status == 0)
+			{
+				result = node;
+			}
+
+			return (SheetStatus)status;
+		}
+
+		/// <summary>
+		/// Converts a decimal literal, exactly as written, into an int64
+		/// rational. No floating point is involved at any point.
+		///
+		/// The grammar accepted is the lexer's: optional sign, digits with an
+		/// optional single decimal point, optional e or E exponent with its own
+		/// optional sign. Anything else is ErrFormat rather than a partial
+		/// conversion of the part that happened to parse.
+		///
+		/// The value is mantissa * 10^(exponent - fractionDigits). A positive
+		/// net exponent scales the numerator; a negative one becomes the
+		/// denominator. Both are checked before every multiply, so an overflow
+		/// is ErrOverflow and never a wrapped value.
+		///
+		/// The result is reduced by gcd, which is what makes trailing zeros
+		/// irrelevant: 0.10 and 0.1 both arrive as 1/10, and 50.00 as 50/1.
+		/// Reduction also widens the range that fits, since 0.5000 reduces to
+		/// 1/2 rather than needing a denominator of 10000.
+		///
+		/// Exponents are handled rather than refused because they are exact:
+		/// 1e3 is 1000/1 and 2.5E-4 is 1/4000. There is no reason to reject a
+		/// value that has an exact representation.
+		/// </summary>
+		private static SheetStatus TryExactRational(string text, out KhzRational rational)
+		{
+			rational = default;
+
+			if (string.IsNullOrEmpty(text))
+			{
+				return SheetStatus.ErrFormat;
+			}
+
+			int i = 0;
+			int n = text.Length;
+			bool negative = false;
+
+			/* The lexer does not put a sign on a number token - a leading minus
+			   is a UnaryNode - but accepting one here costs nothing and makes
+			   the method correct for a hand-built node too. */
+			if (text[i] == '+' || text[i] == '-')
+			{
+				negative = text[i] == '-';
+				i++;
+			}
+
+			ulong mantissa = 0UL;
+			int digits = 0;
+			int fractionDigits = 0;
+			bool seenPoint = false;
+
+			while (i < n)
+			{
+				char c = text[i];
+
+				if (c == '.')
+				{
+					if (seenPoint)
+					{
+						return SheetStatus.ErrFormat;
+					}
+
+					seenPoint = true;
+					i++;
+					continue;
+				}
+
+				if (c < '0' || c > '9')
+				{
+					break;
+				}
+
+				digits++;
+
+				/* Leading zeros are skipped rather than multiplied through, so
+				   0.0000000000000000000001 does not overflow the mantissa on
+				   its way to failing on the denominator. */
+				if (mantissa != 0UL || c != '0')
+				{
+					ulong digit = (ulong)(c - '0');
+
+					if (mantissa > (ulong.MaxValue - digit) / 10UL)
+					{
+						return SheetStatus.ErrOverflow;
+					}
+
+					mantissa = (mantissa * 10UL) + digit;
+				}
+
+				if (seenPoint)
+				{
+					fractionDigits++;
+				}
+
+				i++;
+			}
+
+			if (digits == 0)
+			{
+				return SheetStatus.ErrFormat;
+			}
+
+			int exponent = 0;
+
+			if (i < n && (text[i] == 'e' || text[i] == 'E'))
+			{
+				i++;
+
+				bool exponentNegative = false;
+
+				if (i < n && (text[i] == '+' || text[i] == '-'))
+				{
+					exponentNegative = text[i] == '-';
+					i++;
+				}
+
+				int exponentDigits = 0;
+
+				while (i < n && text[i] >= '0' && text[i] <= '9')
+				{
+					int digit = text[i] - '0';
+
+					/* An exponent beyond a few hundred cannot produce a value
+					   that fits either way, but it is bounded here so the
+					   accumulator itself cannot overflow. */
+					if (exponent > (int.MaxValue - digit) / 10)
+					{
+						return SheetStatus.ErrOverflow;
+					}
+
+					exponent = (exponent * 10) + digit;
+					exponentDigits++;
+					i++;
+				}
+
+				if (exponentDigits == 0)
+				{
+					return SheetStatus.ErrFormat;
+				}
+
+				if (exponentNegative)
+				{
+					exponent = -exponent;
+				}
+			}
+
+			/* Trailing junk means the whole literal is rejected. Converting the
+			   prefix would accept 1.2.3 as 1.2. */
+			if (i != n)
+			{
+				return SheetStatus.ErrFormat;
+			}
+
+			if (mantissa > (ulong)long.MaxValue)
+			{
+				return SheetStatus.ErrOverflow;
+			}
+
+			long numerator = (long)mantissa;
+			long denominator = 1L;
+			int netExponent = exponent - fractionDigits;
+
+			if (netExponent > 0)
+			{
+				for (int k = 0; k < netExponent; ++k)
+				{
+					if (numerator > long.MaxValue / 10L)
+					{
+						return SheetStatus.ErrOverflow;
+					}
+
+					numerator *= 10L;
+				}
+			}
+			else if (netExponent < 0)
+			{
+				int scale = -netExponent;
+
+				for (int k = 0; k < scale; ++k)
+				{
+					if (denominator > long.MaxValue / 10L)
+					{
+						/* The value has no exact int64 rational. 1e-23 is a real
+						   number the format can express and this core cannot
+						   hold, so it is refused rather than rounded. */
+						return SheetStatus.ErrOverflow;
+					}
+
+					denominator *= 10L;
+				}
+
+				long divisor = Gcd(numerator, denominator);
+
+				if (divisor > 1L)
+				{
+					numerator /= divisor;
+					denominator /= divisor;
+				}
+			}
+
+			rational.Numerator = negative ? -numerator : numerator;
+			rational.Denominator = denominator;
+
+			return SheetStatus.Ok;
+		}
+
+		/// <summary>
+		/// Greatest common divisor of a non-negative numerator and a positive
+		/// denominator. Euclid, on unsigned values so no intermediate can be
+		/// negative. Gcd(0, d) is d, which reduces a zero numerator to 0/1.
+		/// </summary>
+		private static long Gcd(long a, long b)
+		{
+			ulong x = (ulong)a;
+			ulong y = (ulong)b;
+
+			while (y != 0UL)
+			{
+				ulong t = x % y;
+				x = y;
+				y = t;
+			}
+
+			return (long)x;
+		}
+
+		/// <summary>
+		/// Reconstructs a rational from a double, for nodes that carry no exact
+		/// text.
+		///
+		/// This is a repair, not a conversion. By the time a literal is a double
+		/// the value the user typed is gone: 0.1 is held as
+		/// 3602879701896397/36028797018963968, and casting that directly would
+		/// be exact but wrong. Formatting with "R" and re-parsing as decimal
+		/// recovers the shortest round-trippable decimal instead, so 0.1 comes
+		/// back as 1/10 - correct for the common cases and an inference in
+		/// general.
+		///
+		/// Nothing produced by FormulaParser reaches here any more. It remains
+		/// only for trees built through the one-argument NumberNode constructor.
+		/// </summary>
+		private static SheetStatus FromDouble(double value, out KhzRational rational)
+		{
+			rational = default;
+
 			if (double.IsNaN(value) || double.IsInfinity(value))
 			{
 				return SheetStatus.ErrOverflow;
@@ -515,19 +807,19 @@ namespace KHZ.Sheet.Core
 				denominator *= 10L;
 			}
 
-			KhzRational rational;
-			rational.Numerator = negative ? -(long)mantissa : (long)mantissa;
-			rational.Denominator = denominator;
+			long numerator = (long)mantissa;
+			long divisor = Gcd(numerator, denominator);
 
-			IntPtr node = IntPtr.Zero;
-			int status = KhzNativeFormula.Const(block, rational, &node);
-
-			if (status == 0)
+			if (divisor > 1L)
 			{
-				result = node;
+				numerator /= divisor;
+				denominator /= divisor;
 			}
 
-			return (SheetStatus)status;
+			rational.Numerator = negative ? -numerator : numerator;
+			rational.Denominator = denominator;
+
+			return SheetStatus.Ok;
 		}
 
 		/// <summary>
@@ -740,7 +1032,20 @@ namespace KHZ.Sheet.Core
 					return SheetStatus.ErrUnsupported;
 			}
 
-			int count = function.Arguments == null ? 0 : function.Arguments.Count;
+			/* Bound to a local, then checked once. The previous form tested
+			   function.Arguments for null inside a conditional and indexed it two
+			   statements later, which is provable to a reader but not to flow
+			   analysis - hence CS8602. Suppressing that with ! would have been
+			   the wrong answer: nothing in the method's own text guaranteed the
+			   property returned the same non-null value on the second read. */
+			IReadOnlyList<FormulaNode>? arguments = function.Arguments;
+
+			if (arguments == null)
+			{
+				return SheetStatus.ErrFormat;
+			}
+
+			int count = arguments.Count;
 			if (count == 0 || count > 64)
 			{
 				return SheetStatus.ErrFormat;
@@ -751,7 +1056,7 @@ namespace KHZ.Sheet.Core
 			for (int i = 0; i < count; ++i)
 			{
 				IntPtr child = IntPtr.Zero;
-				SheetStatus lowered = Lower(block, function.Arguments[i], depth + 1, ref child);
+				SheetStatus lowered = Lower(block, arguments[i], depth + 1, ref child);
 
 				if (lowered != SheetStatus.Ok)
 				{
