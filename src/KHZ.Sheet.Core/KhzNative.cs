@@ -1,10 +1,19 @@
 using System;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace KHZ.Sheet.Core
 {
+	/*
+	 * Entry points and handle wrappers only.
+	 *
+	 * KhzAbiSizes and the KhzAbi verification gate used to live here and now
+	 * live in KhzAbi.cs. They moved in Phase 95 because the gate is the one part
+	 * of the bindings that changes whenever a C struct changes, and editing it
+	 * meant rewriting this whole file - which is large enough that a rewrite is
+	 * itself a risk. Nothing else changed in this file.
+	 */
+
 	/// <summary>Which SIMD kernel was compiled into the native library.</summary>
 	public enum SimdKernel
 	{
@@ -62,26 +71,6 @@ namespace KHZ.Sheet.Core
 		}
 	}
 
-	/// <summary>Mirror of KhzAbiSizes.</summary>
-	[StructLayout(LayoutKind.Sequential)]
-	public struct KhzAbiSizes
-	{
-		public uint Version;
-		public uint PointerBytes;
-		public uint SizeTBytes;
-		public uint ArenaBytes;
-		public uint RationalBytes;
-		public uint CellBytes;
-		public uint GridSlotBytes;
-		public uint GridBytes;
-		public uint DepGraphBytes;
-		public uint SheetBytes;
-		public uint LedgerBytes;
-		public uint CellProofOffset;
-		public uint CellValueOffset;
-		public uint Sha256DigestBytes;
-	}
-
 	/// <summary>
 	/// Mirror of KhzCell, field for field. Read through a pointer into the
 	/// native arena: no copy is made and no marshalling runs. Text and Formula
@@ -119,6 +108,15 @@ namespace KHZ.Sheet.Core
 		public bool IsCommitted
 		{
 			get { return Revision != 0UL; }
+		}
+
+		/// <summary>
+		/// True while the cell is marked dirty and awaiting recalculation. Mirrors
+		/// KHZ_CELL_FLAG_DIRTY.
+		/// </summary>
+		public bool IsDirty
+		{
+			get { return (Flags & 0x00000001u) != 0u; }
 		}
 	}
 
@@ -270,165 +268,6 @@ namespace KHZ.Sheet.Core
 
 		[DllImport(Lib, EntryPoint = "khz_ledger_rows", CallingConvention = CallingConvention.Cdecl)]
 		internal static extern ulong LedgerRows(void* ledger);
-	}
-
-	/// <summary>
-	/// Checks that the managed struct mirrors match the native ones before any
-	/// pointer is dereferenced. Without this a layout change in C would be read
-	/// at wrong offsets and corrupt memory silently, which is far worse than a
-	/// refused call.
-	/// </summary>
-	public static unsafe class KhzAbi
-	{
-		private static bool _verified;
-		private static SheetStatus _result = SheetStatus.ErrState;
-		private static string _detail = "not checked";
-		private static KhzAbiSizes _sizes;
-
-		/// <summary>
-		/// Ok when the native library agrees with these bindings. ErrUnsupported
-		/// on a version or layout mismatch. ErrMissing when the library could not
-		/// be loaded at all. Never throws for any of those.
-		/// </summary>
-		public static SheetStatus Verify(out string detail)
-		{
-			if (_verified)
-			{
-				detail = _detail;
-				return _result;
-			}
-
-			_verified = true;
-
-			KhzAbiSizes sizes;
-
-			try
-			{
-				int rc;
-
-				fixed (KhzAbiSizes* slot = &sizes)
-				{
-					rc = KhzNative.AbiSizes(slot);
-				}
-
-				if ((SheetStatus)rc != SheetStatus.Ok)
-				{
-					_result = (SheetStatus)rc;
-					_detail = "khz_abi_sizes returned " + SheetStatusText.Name(_result);
-					detail = _detail;
-					return _result;
-				}
-			}
-			catch (DllNotFoundException)
-			{
-				// Loading a shared library is the one thing the runtime signals by
-				// throwing. It is converted here so callers keep a status-only API.
-				_result = SheetStatus.ErrMissing;
-				_detail = "native library " + KhzNative.Lib + " not found on the loader path";
-				detail = _detail;
-				return _result;
-			}
-			catch (EntryPointNotFoundException)
-			{
-				_result = SheetStatus.ErrUnsupported;
-				_detail = "native library is present but predates the Phase 91 ABI";
-				detail = _detail;
-				return _result;
-			}
-
-			if (sizes.Version != 91u)
-			{
-				_result = SheetStatus.ErrUnsupported;
-				_detail = "native ABI version " + sizes.Version.ToString() + ", bindings expect 91";
-				detail = _detail;
-				return _result;
-			}
-
-			if (sizes.PointerBytes != (uint)sizeof(void*))
-			{
-				_result = SheetStatus.ErrUnsupported;
-				_detail = "pointer width mismatch: native " + sizes.PointerBytes.ToString()
-					+ ", managed " + sizeof(void*).ToString();
-				detail = _detail;
-				return _result;
-			}
-
-			if (sizes.CellBytes != (uint)sizeof(KhzCellNative))
-			{
-				_result = SheetStatus.ErrUnsupported;
-				_detail = "KhzCell size mismatch: native " + sizes.CellBytes.ToString()
-					+ ", managed " + sizeof(KhzCellNative).ToString();
-				detail = _detail;
-				return _result;
-			}
-
-			if (sizes.RationalBytes != (uint)sizeof(KhzRationalNative))
-			{
-				_result = SheetStatus.ErrUnsupported;
-				_detail = "KhzRational size mismatch";
-				detail = _detail;
-				return _result;
-			}
-
-			if (sizes.CellProofOffset != 72u || sizes.CellValueOffset != 16u)
-			{
-				// Offsets are checked as well as sizes: two different layouts can
-				// share a total size while placing fields elsewhere.
-				_result = SheetStatus.ErrUnsupported;
-				_detail = "KhzCell field offsets differ from the mirrored layout";
-				detail = _detail;
-				return _result;
-			}
-
-			_sizes = sizes;
-			_result = SheetStatus.Ok;
-			_detail = "ok";
-			detail = _detail;
-			return _result;
-		}
-
-		internal static SheetStatus Sizes(out KhzAbiSizes sizes)
-		{
-			string ignored;
-			SheetStatus status = Verify(out ignored);
-
-			sizes = _sizes;
-			return status;
-		}
-
-		/// <summary>Which kernel the native library was compiled with.</summary>
-		public static SheetStatus TryKernel(out SimdKernel kernel, out nuint lanes)
-		{
-			string ignored;
-			SheetStatus status = Verify(out ignored);
-
-			if (status != SheetStatus.Ok)
-			{
-				kernel = SimdKernel.Scalar;
-				lanes = (nuint)0;
-				return status;
-			}
-
-			kernel = (SimdKernel)KhzNative.SimdKernelId();
-			lanes = KhzNative.SimdLanes();
-			return SheetStatus.Ok;
-		}
-
-		/// <summary>Runs the native known-answer tests. Zero means all matched.</summary>
-		public static SheetStatus TrySelftest(out int failures)
-		{
-			string ignored;
-			SheetStatus status = Verify(out ignored);
-
-			if (status != SheetStatus.Ok)
-			{
-				failures = -1;
-				return status;
-			}
-
-			failures = KhzNative.SheetSelftest();
-			return SheetStatus.Ok;
-		}
 	}
 
 	/// <summary>
