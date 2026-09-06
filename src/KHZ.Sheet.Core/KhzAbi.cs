@@ -122,16 +122,24 @@ namespace KHZ.Sheet.Core
 
 			_verified = true;
 
-			KhzAbiSizes sizes;
+			// Zeroed rather than merely declared. Taking the address of an
+			// unassigned local is legal and marks it assigned, but relying on
+			// that rule buys nothing here, and if a native call ever returns an
+			// error without writing the struct, this leaves defined zeros behind
+			// instead of whatever the stack happened to hold.
+			KhzAbiSizes sizes = default;
 
 			try
 			{
-				int rc;
-
-				fixed (KhzAbiSizes* slot = &sizes)
-				{
-					rc = KhzNative.AbiSizes(slot);
-				}
+				// The address is taken directly, not pinned.
+				//
+				// This was `fixed (KhzAbiSizes* slot = &sizes)`, which is error
+				// CS0213 rather than harmless redundancy: `fixed` is defined to
+				// pin a movable variable, and a local is not movable. It lives on
+				// the stack and the garbage collector never relocates it, so it is
+				// already fixed for as long as this frame exists - which is longer
+				// than the native call.
+				int rc = KhzNative.AbiSizes(&sizes);
 
 				if ((SheetStatus)rc != SheetStatus.Ok)
 				{
