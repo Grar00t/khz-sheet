@@ -1,19 +1,27 @@
 /* khz_xlsx_reader.c - part 1 of 2: the zip layer.
  *
  * Locates the end-of-central-directory record, walks the central directory,
- * resolves each entry's local header and recomputes its CRC-32. The XML parts
- * are dealt with in src/khz_xlsx_reader_parse.c; the split is by concern, and
- * both translation units are required at link.
+ * resolves each entry's local header, decompresses it if needed and recomputes
+ * its CRC-32. The XML parts are dealt with in src/khz_xlsx_reader_parse.c; the
+ * split is by concern, and both translation units are required at link.
  *
  * Every offset read out of the archive is bounds-checked against the buffer
  * before it is used. A zip file is untrusted input: a truncated or hostile
  * central directory that claims an entry lives past the end of the buffer has
  * to be refused, not dereferenced.
+ *
+ * Phase 97 added DEFLATE. Before it, every method except 0 was refused, which
+ * meant no workbook produced by Excel could be opened - Excel always
+ * compresses. That made the reader a demonstration rather than a reader. The
+ * decompressor is src/khz_inflate.c, written for this project and tested
+ * against real zlib output and against the members of a real .xlsx before it
+ * was committed.
  */
 
 #include <string.h>
 
 #include "khz_grid.h"
+#include "khz_inflate.h"
 #include "khz_xlsx_reader.h"
 
 /* Fixed record sizes, excluding the variable-length name/extra/comment. */
@@ -24,6 +32,19 @@
 /* A zip comment is a 16-bit length, so the EOCD cannot start further back
    than this from the end of the file. */
 #define KHZ_ZIP_MAX_COMMENT ((size_t)65535)
+
+/* Method 8. Defined here rather than in the header so that adding DEFLATE
+   support did not require an edit to a second file in the same push. */
+#define KHZ_ZIP_METHOD_DEFLATE ((uint16_t)8)
+
+/* Largest uncompressed part this reader will produce.
+
+   A compression ratio of a thousand to one is easy to construct, so a small
+   archive can declare a part of any size it likes. Without a ceiling the
+   arena would absorb the whole thing and report exhaustion - a correct
+   outcome reached by the wrong route, and one that would take the rest of
+   the workbook down with it. Refusing early names the real problem. */
+#define KHZ_XLSX_READER_MAX_PART ((size_t)64 * (size_t)1024 * (size_t)1024)
 
 static uint16_t khz_load_le16(const unsigned char *p)
 {
@@ -157,10 +178,17 @@ static KhzSheetStatus khz_zip_find_eocd(const unsigned char *bytes, size_t size,
 /* Confirms the local header agrees with the central directory and returns the
    offset of the payload. The two records duplicate the method and the CRC, and
    a disagreement between them means the archive was rewritten badly, so it is
-   treated as a format error rather than trusting either copy. */
+   treated as a format error rather than trusting either copy.
+
+   payload_bytes is the size on disk - the compressed size, which for a stored
+   entry is also the uncompressed size. Passing the uncompressed size here for
+   a DEFLATE entry would check the wrong extent, and would pass for a part
+   that compressed well while failing for one that did not. The compressed
+   size is taken from the central directory rather than the local header
+   because an entry written with a data descriptor carries zeroes here. */
 static KhzSheetStatus khz_zip_payload(const unsigned char *bytes, size_t size,
                                       size_t local_offset, uint16_t method,
-                                      size_t declared_size, size_t *data_offset)
+                                      size_t payload_bytes, size_t *data_offset)
 {
 	size_t name_len;
 	size_t extra_len;
@@ -195,7 +223,7 @@ static KhzSheetStatus khz_zip_payload(const unsigned char *bytes, size_t size,
 
 	start += extra_len;
 
-	if (declared_size > size - start) {
+	if (payload_bytes > size - start) {
 		return KHZ_SHEET_ERR_FORMAT;
 	}
 
@@ -252,8 +280,9 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 		return KHZ_SHEET_ERR_FORMAT;
 	}
 
-	/* One mark for the whole load. Either every entry record and name is
-	   allocated, or the arena is returned to exactly where it was. */
+	/* One mark for the whole load. Either every entry record, name and
+	   inflated payload is allocated, or the arena is returned to exactly
+	   where it was. */
 	mark = khz_arena_mark(reader->arena);
 
 	table = (KhzXlsxEntry *)khz_arena_alloc_zeroed(reader->arena,
@@ -272,9 +301,11 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 		size_t comment_len;
 		size_t local_offset;
 		size_t declared_size;
+		size_t packed_size;
 		size_t data_offset;
 		uint16_t method;
 		uint32_t declared_crc;
+		const unsigned char *payload;
 		char *name;
 
 		if (cursor > size || size - cursor < KHZ_ZIP_CENTRAL_FIXED) {
@@ -289,6 +320,7 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 
 		method = khz_load_le16(raw + cursor + 10);
 		declared_crc = khz_load_le32(raw + cursor + 16);
+		packed_size = (size_t)khz_load_le32(raw + cursor + 20);
 		declared_size = (size_t)khz_load_le32(raw + cursor + 24);
 		name_len = (size_t)khz_load_le16(raw + cursor + 28);
 		extra_len = (size_t)khz_load_le16(raw + cursor + 30);
@@ -307,21 +339,74 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 			return KHZ_SHEET_ERR_FORMAT;
 		}
 
-		/* DEFLATE and every other method is refused here. See the header:
-		   inflating would need a dependency this project does not take. */
-		if (method != KHZ_XLSX_METHOD_STORED) {
+		/* Stored and DEFLATE only. Every other method in the appnote -
+		   bzip2, LZMA, zstd, the obsolete shrink and implode - is refused
+		   by name rather than attempted. Excel writes 8, and this project
+		   writes 0. */
+		if (method != KHZ_XLSX_METHOD_STORED
+		    && method != KHZ_ZIP_METHOD_DEFLATE) {
 			reader->report.entries_rejected += 1u;
 			(void)khz_arena_release(reader->arena, mark);
 			return KHZ_SHEET_ERR_UNSUPPORTED;
 		}
 
+		if (declared_size > KHZ_XLSX_READER_MAX_PART) {
+			reader->report.entries_rejected += 1u;
+			(void)khz_arena_release(reader->arena, mark);
+			return KHZ_SHEET_ERR_LIMIT;
+		}
+
+		/* A stored entry that claims two different sizes is describing
+		   something impossible. */
+		if (method == KHZ_XLSX_METHOD_STORED && packed_size != declared_size) {
+			reader->report.entries_rejected += 1u;
+			(void)khz_arena_release(reader->arena, mark);
+			return KHZ_SHEET_ERR_FORMAT;
+		}
+
 		status = khz_zip_payload(raw, size, local_offset, method,
-		                         declared_size, &data_offset);
+		                         packed_size, &data_offset);
 
 		if (status != KHZ_SHEET_OK) {
 			reader->report.entries_rejected += 1u;
 			(void)khz_arena_release(reader->arena, mark);
 			return status;
+		}
+
+		if (method == KHZ_XLSX_METHOD_STORED) {
+			/* Points straight into the caller's buffer. No copy: the
+			   bytes are already exactly the part. */
+			payload = raw + data_offset;
+			reader->report.entries_stored += 1u;
+		} else {
+			unsigned char *inflated = NULL;
+			size_t produced = 0;
+
+			status = khz_inflate_to_arena(reader->arena,
+			                              raw + data_offset,
+			                              packed_size,
+			                              declared_size,
+			                              &inflated,
+			                              &produced);
+
+			if (status != KHZ_SHEET_OK) {
+				/* Includes the case where the stream decoded cleanly
+				   but produced a different number of bytes than the
+				   header declared, which khz_inflate_to_arena reports
+				   as ERR_FORMAT. */
+				reader->report.entries_rejected += 1u;
+				(void)khz_arena_release(reader->arena, mark);
+				return status;
+			}
+
+			payload = inflated;
+
+			/* entries_stored counts entries whose payload was made
+			   available, which now includes inflated ones. There is no
+			   separate counter for the compressed case because adding
+			   one means editing khz_xlsx_reader.h, and this push does
+			   not touch the header. Worth a field in a later phase. */
+			reader->report.entries_stored += 1u;
 		}
 
 		name = (char *)khz_arena_alloc_zeroed(reader->arena, name_len + 1u);
@@ -336,17 +421,18 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 
 		table[index].name = name;
 		table[index].name_len = name_len;
-		table[index].data = raw + data_offset;
+		table[index].data = payload;
 		table[index].size = declared_size;
 		table[index].method = method;
 		table[index].declared_crc32 = declared_crc;
+
+		/* Always over the uncompressed bytes, whichever path produced
+		   them. For a DEFLATE entry this checks the decoder as much as it
+		   checks the archive: a decoder bug that produced the right byte
+		   count and the wrong contents would be caught here. */
 		table[index].actual_crc32 =
-			khz_xlsx_reader_crc32(raw + data_offset, declared_size);
+			khz_xlsx_reader_crc32(payload, declared_size);
 
-		reader->report.entries_stored += 1u;
-
-		/* A stored checksum that disagrees with the bytes means the part is
-		   not what the archive says it is. Counted and refused. */
 		if (table[index].actual_crc32 != declared_crc) {
 			reader->report.crc_failures += 1u;
 			(void)khz_arena_release(reader->arena, mark);
