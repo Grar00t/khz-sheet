@@ -1,7 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <!--
+      net8.0, not net9.0. Nothing in this project needs 9: it is P/Invoke,
+      unsafe pointer reads and explicit struct layout, all of which settled
+      long before 8. Targeting 9 bought nothing and cost the ability to build
+      on a machine whose distribution packages 8, which is a self inflicted
+      dependency. 8 is LTS.
+    -->
+    <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -25,17 +32,21 @@
     The native library is not referenced through the project file either.
     ProjectReference and PackageReference cannot express "a CMake target built
     out of tree", and inventing a hardcoded path here would break on every
-    machine but one. Build it with:
+    machine but one. Configure the CMake project in the repository root into a
+    build directory, build that directory, then put the resulting
+    libkhz_sheet.so, khz_sheet.dll or libkhz_sheet.dylib on the loader path:
+    LD_LIBRARY_PATH, the executable's own directory, or a runtimes native
+    folder in a published layout.
 
-      cmake -B build -DCMAKE_BUILD_TYPE=Release
-      cmake --build build
+    The exact command lines are deliberately not written out here. An XML
+    comment cannot contain a double hyphen, and this comment previously did -
+    it quoted a cmake invocation verbatim, which made the project file
+    unparseable and put the whole C# layer out of reach of the compiler with
+    error MSB4025. Prose describes the steps; a shell is the place to type
+    them.
 
-    then put the resulting libkhz_sheet.so, khz_sheet.dll or libkhz_sheet.dylib
-    on the loader path (LD_LIBRARY_PATH, the executable's directory, or a
-    runtimes/<rid>/native folder in a published layout).
-
-    KhzAbi.Verify reports ErrMissing when it is not found, so a missing native
-    library is a status code rather than a crash.
+    KhzAbi.Verify reports ErrMissing when the native library is not found, so
+    a missing library is a status code rather than a crash.
   -->
 
 </Project>
