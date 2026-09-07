@@ -446,6 +446,134 @@ static KhzSheetStatus khz_eval_arith(const KhzFormulaNode *node,
     return khz_result_value(out, value);
 }
 
+/* ---------------------------------------------------------------- *
+ * Power
+ *
+ * Square and multiply over khz_rational_mul. Every partial product is reduced
+ * by the same routine that reduces a multiplication typed by the user, and an
+ * overflow anywhere in the chain is refused rather than wrapped or saturated,
+ * so 2^62 is exact and 2^63 is #NUM!.
+ *
+ * The exponent is required to be an integer. A non-integer exponent is #NUM!
+ * in the cell, which means khz_formula_eval_strict reports it as
+ * KHZ_SHEET_ERR_OVERFLOW - not the KHZ_SHEET_ERR_UNSUPPORTED that the header
+ * claimed when the op was declared. There is no cell error meaning
+ * "unsupported" for a value to carry, and making it a status instead would
+ * let one cell holding =2^0.5 abort recalculation of the whole sheet. Overflow
+ * is also the honest description: an irrational result is exactly what an
+ * int64 rational cannot represent.
+ * ---------------------------------------------------------------- */
+
+static KhzSheetStatus khz_pow_magnitude(KhzRational base, int64_t exponent,
+                                        KhzRational *out)
+{
+    KhzRational result;
+    KhzRational factor = base;
+    int64_t n = exponent; /* caller guarantees 1 <= n <= KHZ_FORMULA_MAX_EXPONENT */
+    KhzSheetStatus status = khz_rational_make((int64_t)1, (int64_t)1, &result);
+
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    while (n > (int64_t)0) {
+        if ((n & (int64_t)1) != (int64_t)0) {
+            status = khz_rational_mul(result, factor, &result);
+            if (status != KHZ_SHEET_OK) {
+                return status;
+            }
+        }
+
+        n >>= 1;
+
+        /* Guarded, so the last iteration does not square a factor nobody will
+           read. Without the guard 2^62 would compute 2^124 on the way past
+           and refuse a result that fits. */
+        if (n > (int64_t)0) {
+            status = khz_rational_mul(factor, factor, &factor);
+            if (status != KHZ_SHEET_OK) {
+                return status;
+            }
+        }
+    }
+
+    *out = result;
+    return KHZ_SHEET_OK;
+}
+
+static KhzSheetStatus khz_eval_pow(KhzRational base, KhzRational exponent,
+                                   KhzFormulaResult *out)
+{
+    KhzRational one;
+    KhzRational value;
+    KhzSheetStatus status;
+    int64_t n;
+
+    if (exponent.den != (int64_t)1) {
+        return khz_result_error(out, KHZ_CELL_ERROR_NUM);
+    }
+
+    n = exponent.num;
+
+    status = khz_rational_make((int64_t)1, (int64_t)1, &one);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    /* 0^0 is 1 because Excel says 1, not because the mathematics is settled. */
+    if (n == (int64_t)0) {
+        return khz_result_value(out, one);
+    }
+
+    if (base.num == (int64_t)0) {
+        if (n < (int64_t)0) {
+            return khz_result_error(out, KHZ_CELL_ERROR_DIV0);
+        }
+        return khz_result_zero(out);
+    }
+
+    if (base.num == (int64_t)1 && base.den == (int64_t)1) {
+        return khz_result_value(out, one);
+    }
+
+    if (base.num == (int64_t)-1 && base.den == (int64_t)1) {
+        if ((n % (int64_t)2) == (int64_t)0) {
+            return khz_result_value(out, one);
+        }
+        return khz_result_value(out, base);
+    }
+
+    /* Compared before negating, so an exponent of INT64_MIN is rejected here
+       rather than negated into itself. Every base that reaches this point has
+       magnitude at least 2 or at most 1/2 and so leaves int64 long before the
+       bound, which is why the bound refuses nothing that could have
+       succeeded. */
+    if (n > KHZ_FORMULA_MAX_EXPONENT || n < -KHZ_FORMULA_MAX_EXPONENT) {
+        return khz_result_error(out, KHZ_CELL_ERROR_NUM);
+    }
+
+    status = khz_pow_magnitude(base, n < (int64_t)0 ? -n : n, &value);
+
+    if (status == KHZ_SHEET_OK && n < (int64_t)0) {
+        /* Reciprocal of the finished power, not a division repeated inside the
+           loop: 2^-3 is 1/8 exactly. value.num cannot be zero, because a base
+           with a zero numerator was answered above. */
+        status = khz_rational_div(one, value, &value);
+    }
+
+    if (status == KHZ_SHEET_ERR_OVERFLOW) {
+        return khz_result_error(out, KHZ_CELL_ERROR_NUM);
+    }
+    if (status == KHZ_SHEET_ERR_DIVZERO) {
+        return khz_result_error(out, KHZ_CELL_ERROR_DIV0);
+    }
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    return khz_result_value(out, value);
+}
+
 static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
                                     size_t depth, KhzFormulaResult *out)
 {
@@ -514,6 +642,7 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
     case KHZ_FORMULA_SUB:
     case KHZ_FORMULA_MUL:
     case KHZ_FORMULA_DIV:
+    case KHZ_FORMULA_POW:
         if (node->child_count != 2u) {
             return KHZ_SHEET_ERR_FORMAT;
         }
@@ -533,6 +662,10 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
         }
         if (khz_result_is_error(&right)) {
             return khz_result_error(out, (KhzCellError)right.error);
+        }
+
+        if (node->op == (uint32_t)KHZ_FORMULA_POW) {
+            return khz_eval_pow(left.value, right.value, out);
         }
 
         return khz_eval_arith(node, left.value, right.value, out);
