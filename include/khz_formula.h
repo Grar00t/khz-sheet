@@ -57,18 +57,74 @@ typedef enum KhzFormulaOp {
     KHZ_FORMULA_SUM   = 8,
     KHZ_FORMULA_AVG   = 9,
     KHZ_FORMULA_MIN   = 10,
-    KHZ_FORMULA_MAX   = 11
+    KHZ_FORMULA_MAX   = 11,
+    KHZ_FORMULA_POW   = 12  /* exact integer exponent only, see below */
 } KhzFormulaOp;
 
 /* RANGE and NEG are additions to the ten operations that were specified.
    Neither is optional: SUM(A1:B9) has no meaning without a range node, and
    without NEG the expression -A1 has to be faked as 0-A1, which is a different
-   tree and would silently change what the proof chain attests to. */
+   tree and would silently change what the proof chain attests to.
+
+   POW is the eleventh operation and the first one added after the original
+   specification. It is numbered 12 rather than inserted in arithmetic order so
+   that every op above keeps the value it has always had; the enum is not part
+   of any struct measured by khz_abi_sizes, so adding a member does not move
+   the ABI version. */
+
+/* ---------------------------------------------------------------------- *
+ * POWER: WHAT IS EXACT AND WHAT IS REFUSED
+ *
+ * The exponent must be an integer. Concretely, a POW node evaluates only when
+ * its right child reduces to a rational with den == 1; anything else is
+ * KHZ_SHEET_ERR_UNSUPPORTED from khz_formula_eval_strict and #NUM! from
+ * khz_formula_eval.
+ *
+ * This refuses 2^0.5 and 8^(1/3) - both of which Excel answers. That is a
+ * real and deliberate loss of parity, and the reason is that the alternative
+ * is worse. An irrational result cannot be an int64 rational, so answering it
+ * means either rounding into KhzRational, which breaks the one invariant every
+ * value in this engine has always held, or returning a double alongside a flag
+ * saying the number is only approximate. The second option sounds harmless
+ * and is not: every consumer - the SIMD kernels, the ledger, the xlsx writer,
+ * the proof chain, the C# bindings - would have to start propagating that flag
+ * correctly, and the first one that forgets turns an approximation into an
+ * attested fact. Irrational powers will arrive when there is a separate
+ * inexact value kind that the type system forces callers to handle, not as a
+ * flag bolted onto the exact one.
+ *
+ * Within integer exponents the arithmetic is exact and total:
+ *
+ *   - Positive exponent: repeated multiplication by squaring, through
+ *     khz_rational_mul, so every intermediate is reduced and any overflow is
+ *     refused as KHZ_SHEET_ERR_OVERFLOW rather than wrapped. 2^62 is exact;
+ *     2^64 is refused. Refused, not saturated to INT64_MAX.
+ *
+ *   - Negative exponent: the reciprocal of the positive power. 2^-3 is 1/8.
+ *     0^-1 is a division by zero and yields #DIV/0!, matching Excel.
+ *
+ *   - Zero exponent: 1/1 for every base including zero. 0^0 is 1 here because
+ *     Excel returns 1, not because the mathematics is settled.
+ *
+ * A base that is negative is fine: (-2)^3 is -8/1 and (-2)^2 is 4/1. This is
+ * only unproblematic because the exponent is an integer, which is the same
+ * reason the integer restriction is not merely conservative.
+ * ---------------------------------------------------------------------- */
 
 #define KHZ_FORMULA_MAX_DEPTH   ((size_t)64)
 #define KHZ_FORMULA_MAX_NODES   ((size_t)4096)
 #define KHZ_FORMULA_MAX_ARGS    ((size_t)64)
 #define KHZ_FORMULA_MAX_SOURCE  ((size_t)8192)
+
+/* Largest magnitude accepted as a POW exponent. The bound is not about the
+   size of the answer - overflow is already refused exactly by
+   khz_rational_mul - but about the work: an exponent of 2^31 would spin
+   through thirty-one squarings before discovering that the second one already
+   overflowed. Any base whose magnitude is at least 2 overflows int64 well
+   before the exponent reaches 64, and the bases that do not (0, 1, -1) are
+   answered without iterating. So this bound rejects nothing that could have
+   succeeded. */
+#define KHZ_FORMULA_MAX_EXPONENT ((int64_t)1024)
 
 /* One node. Children are an arena array of pointers, so an n-ary aggregate and
    a binary operator use the same shape and the evaluator has one walk.
@@ -127,7 +183,12 @@ typedef struct KhzFormulaParseError {
  * Conflating the two is how spreadsheets end up showing 0 where they should
  * show #VALUE!. Callers that want the raw status instead of the error value -
  * a test, or a caller that must distinguish exact overflow from a user-visible
- * #NUM! - use khz_formula_eval_strict. */
+ * #NUM! - use khz_formula_eval_strict.
+ *
+ * A non-integer exponent sits on the value side of that line: the cell shows
+ * #NUM!, which is what Excel shows for a power it cannot produce, and
+ * khz_formula_eval_strict reports KHZ_SHEET_ERR_UNSUPPORTED so a test can tell
+ * "this engine will not answer that" apart from "the answer overflowed". */
 typedef struct KhzFormulaResult {
     uint32_t    kind;    /* KhzCellKind: RATIONAL or ERROR */
     uint32_t    error;   /* KhzCellError when kind is ERROR */
@@ -153,7 +214,8 @@ KhzSheetStatus khz_formula_range(KhzFormula *formula,
 
 /* children is copied into the arena; the caller's array need not outlive the
    call. Arity is checked against the operation: DIV with three children is
-   refused rather than silently ignoring the third. */
+   refused rather than silently ignoring the third. POW is binary and is
+   checked the same way. */
 KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
                                 KhzFormulaNode *const *children,
                                 size_t child_count, KhzFormulaNode **out);
@@ -167,6 +229,18 @@ KhzSheetStatus khz_formula_set_root(KhzFormula *formula, KhzFormulaNode *root);
    Numeric literals are exact: 0.1 becomes 1/10, not the nearest double. That
    is the whole point of the rational core, and it is decided here at the
    lexer, because a literal that arrives as a double has already lost.
+
+   Operator precedence, loosest first:
+
+       + -            binary addition and subtraction
+       * /            multiplication and division
+       ^              power, left-associative
+       - +            unary sign
+       ( ) A1 12 F()  primaries
+
+   Unary sign binding tighter than ^ is Excel's rule and not C's, so -2^2 is
+   4. ^ associating to the left is also Excel's rule, so 2^3^2 is 64. Both are
+   deliberate; see the POW block above.
 
    error may be NULL. On failure the arena is rewound to the entry mark. */
 KhzSheetStatus khz_formula_parse(KhzFormula *formula, KhzArena *arena,
@@ -190,7 +264,8 @@ KhzSheetStatus khz_formula_eval(struct KhzSheet *sheet, const KhzFormula *formul
 /* As above, but a spreadsheet error is returned as its status code rather than
    converted into a value: #DIV/0! becomes KHZ_SHEET_ERR_DIVZERO, a text operand
    becomes KHZ_SHEET_ERR_TYPE, an unrepresentable result becomes
-   KHZ_SHEET_ERR_OVERFLOW. */
+   KHZ_SHEET_ERR_OVERFLOW, and a non-integer exponent becomes
+   KHZ_SHEET_ERR_UNSUPPORTED. */
 KhzSheetStatus khz_formula_eval_strict(struct KhzSheet *sheet,
                                        const KhzFormula *formula,
                                        KhzRational *out);
