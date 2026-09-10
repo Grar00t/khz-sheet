@@ -31,7 +31,7 @@ namespace KHZ.Sheet.Core
 		/// On failure, failure carries the byte offset the C parser stopped at
 		/// and what it expected there.
 		/// </summary>
-		public static SheetStatus TrySetFormula(this NativeSheet sheet, uint col, uint row,
+		public static SheetStatus TrySetFormula(this NativeSheet? sheet, uint col, uint row,
 		                                        string source, out FormulaParseFailure failure)
 		{
 			failure = new FormulaParseFailure(0UL, string.Empty);
