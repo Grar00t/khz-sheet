@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>KHZ.Sheet</AssemblyName>
+    <RootNamespace>KHZ.Sheet.Desktop</RootNamespace>
+    <Product>KHZ Sheet</Product>
+    <Title>KHZ Sheet</Title>
+    <Description>Local-first deterministic spreadsheet workstation</Description>
+    <PackageTags>Productivity;Spreadsheet;Local-first;Desktop</PackageTags>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KHZ.Sheet.Core\KHZ.Sheet.Core.csproj" />
+  </ItemGroup>
+</Project>
