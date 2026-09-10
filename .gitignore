@@ -2,3 +2,10 @@ build/
 *.o
 *.so
 *.a
+*.dll
+*.dylib
+bin/
+obj/
+.vs/
+*.user
+*.suo

@@ -1,0 +1,25 @@
+name: Desktop Windows
+
+on:
+  pull_request:
+    paths:
+      - "src/KHZ.Sheet.Core/**"
+      - "src/KHZ.Sheet.Desktop/**"
+      - "CMakeLists.txt"
+      - "build-desktop.ps1"
+      - ".github/workflows/desktop-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build native core and desktop app
+        shell: pwsh
+        run: ./build-desktop.ps1
