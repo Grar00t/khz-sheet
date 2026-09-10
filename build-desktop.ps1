@@ -13,7 +13,8 @@ cmake -S $RepoRoot -B $NativeBuildDir `
     -DKHZ_ENABLE_LEDGER=OFF `
     -DKHZ_BUILD_SELFTEST=OFF `
     -DKHZ_BUILD_TESTS=OFF `
-    -DKHZ_BUILD_SHARED=ON
+    -DKHZ_BUILD_SHARED=ON `
+    -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON
 
 cmake --build $NativeBuildDir --config Release --target khz_sheet_shared
 dotnet build $DesktopProject -c Release
