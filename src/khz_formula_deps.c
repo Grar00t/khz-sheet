@@ -66,9 +66,6 @@ static uint64_t khz_dep_range_materialized(const KhzDepGraph *graph,
     return count;
 }
 
-/* Removes dependencies targeting one formula from exactly one side of mark.
-   remove_new != 0 removes allocations made at/after mark (rollback).
-   remove_new == 0 removes older allocations (successful replacement). */
 static void khz_dep_prune_target(KhzDepGraph *graph, size_t target,
                                  size_t mark, int remove_new)
 {
@@ -129,10 +126,6 @@ static int khz_formula_target_index(KhzSheet *sheet, uint32_t col, uint32_t row,
 {
     return khz_grid_find(&sheet->grid, col, row, index, NULL) == KHZ_SHEET_OK ? 1 : 0;
 }
-
-/* ---------------------------------------------------------------- *
- * Dependency declaration
- * ---------------------------------------------------------------- */
 
 static KhzSheetStatus khz_declare_walk(KhzSheet *sheet, const KhzFormulaNode *node,
                                        uint32_t col, uint32_t row,
@@ -204,10 +197,6 @@ KhzSheetStatus khz_formula_declare_dependencies(KhzSheet *sheet,
     return status;
 }
 
-/* ---------------------------------------------------------------- *
- * Setting and recalculating
- * ---------------------------------------------------------------- */
-
 KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
                                const char *source, size_t len,
                                KhzFormulaParseError *error)
@@ -228,8 +217,6 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
         return KHZ_SHEET_ERR_STATE;
     }
 
-    /* Preflight the only deterministic commit-counter failures before graph or
-       cell state is changed. */
     status = khz_grid_find(&sheet->grid, col, row, NULL, &existing);
     if (status != KHZ_SHEET_OK && status != KHZ_SHEET_ERR_MISSING) {
         return status;
@@ -260,22 +247,15 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
     status = khz_sheet_set_formula(sheet, col, row, source, len);
 
     if (khz_formula_target_index(sheet, col, row, &target) == 0) {
-        /* No installed cell means none of the newly declared dependencies may
-           remain reachable. */
         khz_formula_abandon(&formula);
         return status == KHZ_SHEET_OK ? KHZ_SHEET_ERR_STATE : status;
     }
 
     if (status == KHZ_SHEET_OK) {
-        /* New dependencies are all at/above dep_mark. Retire only older ones. */
         khz_dep_prune_target(&sheet->deps, target, dep_mark, 0);
         return KHZ_SHEET_OK;
     }
 
-    /* Normally a setter failure happens before the cell is changed (arena or
-       grid exhaustion). If the new bytes nevertheless reached the cell, keep
-       the new graph generation because it describes the state that now exists;
-       otherwise roll it back and release the parse tree and new graph nodes. */
     {
         KhzCell *current = NULL;
         int installed = 0;
@@ -299,8 +279,6 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
     return status;
 }
 
-/* Marks direct formula dependents after a recalculated value actually changes.
-   Plain setters already perform the same direct invalidation in khz_sheet.c. */
 static void khz_dirty_dependents(KhzSheet *sheet, size_t index)
 {
     const KhzDepEdge *edge;
@@ -333,6 +311,103 @@ static int khz_value_changed(const KhzCell *cell, const KhzFormulaResult *result
         || cell->value.den != result->value.den ? 1 : 0;
 }
 
+/* Recalculation only needs ordering constraints whose dependent is currently a
+   formula. A formula overwritten by a value leaves its historic graph nodes in
+   the append-only arena, but those nodes no longer describe executable work.
+   The generic dependency graph is left untouched; this filtered Kahn walk is a
+   formula-engine view of it, so explicit graph users retain their full edges. */
+static KhzSheetStatus khz_formula_evaluation_order(KhzSheet *sheet,
+                                                   size_t *order,
+                                                   size_t capacity,
+                                                   size_t *count)
+{
+    size_t used;
+    size_t *pending;
+    size_t *queue;
+    size_t head = (size_t)0;
+    size_t tail = (size_t)0;
+    size_t emitted = (size_t)0;
+    size_t source;
+
+    if (sheet == NULL || order == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    used = sheet->grid.cell_count;
+    if (capacity < used) {
+        return KHZ_SHEET_ERR_RANGE;
+    }
+    if (used == (size_t)0) {
+        if (count != NULL) {
+            *count = (size_t)0;
+        }
+        return KHZ_SHEET_OK;
+    }
+
+    pending = (size_t *)khz_arena_alloc_zeroed(&sheet->arena, used * sizeof *pending);
+    queue = (size_t *)khz_arena_alloc(&sheet->arena, used * sizeof *queue);
+    if (pending == NULL || queue == NULL) {
+        return KHZ_SHEET_ERR_MEMORY;
+    }
+
+    for (source = (size_t)0; source < used; ++source) {
+        const KhzDepEdge *edge;
+
+        for (edge = sheet->deps.heads[source]; edge != NULL; edge = edge->next) {
+            if (edge->to >= used) {
+                return KHZ_SHEET_ERR_STATE;
+            }
+            if (sheet->grid.cells[edge->to].kind != (uint32_t)KHZ_CELL_FORMULA) {
+                continue;
+            }
+            if (pending[edge->to] == SIZE_MAX) {
+                return KHZ_SHEET_ERR_OVERFLOW;
+            }
+            pending[edge->to] += (size_t)1;
+        }
+    }
+
+    for (source = (size_t)0; source < used; ++source) {
+        if (pending[source] == (size_t)0) {
+            queue[tail++] = source;
+        }
+    }
+
+    while (head < tail) {
+        size_t at = queue[head++];
+        const KhzDepEdge *edge;
+
+        order[emitted++] = at;
+
+        for (edge = sheet->deps.heads[at]; edge != NULL; edge = edge->next) {
+            if (edge->to >= used) {
+                return KHZ_SHEET_ERR_STATE;
+            }
+            if (sheet->grid.cells[edge->to].kind != (uint32_t)KHZ_CELL_FORMULA) {
+                continue;
+            }
+            if (pending[edge->to] == (size_t)0) {
+                return KHZ_SHEET_ERR_STATE;
+            }
+
+            pending[edge->to] -= (size_t)1;
+            if (pending[edge->to] == (size_t)0) {
+                queue[tail++] = edge->to;
+            }
+        }
+    }
+
+    if (emitted != used) {
+        return KHZ_SHEET_ERR_CYCLE;
+    }
+
+    if (count != NULL) {
+        *count = emitted;
+    }
+
+    return KHZ_SHEET_OK;
+}
+
 KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 {
     KhzArena *arena;
@@ -362,8 +437,6 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         return KHZ_SHEET_OK;
     }
 
-    /* Range edges are permanent graph state. Materialise them before taking
-       the scratch mark used by the topological-order buffer. */
     status = khz_dep_range_sync(&sheet->deps);
     if (status != KHZ_SHEET_OK) {
         return status;
@@ -378,7 +451,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         return KHZ_SHEET_ERR_MEMORY;
     }
 
-    status = khz_sheet_evaluation_order(sheet, order, capacity, &count);
+    status = khz_formula_evaluation_order(sheet, order, capacity, &count);
     if (status != KHZ_SHEET_OK) {
         (void)khz_arena_release(arena, mark);
         return status;
