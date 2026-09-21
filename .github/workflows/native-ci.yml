@@ -1,0 +1,74 @@
+name: Native CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake python3 libsqlite3-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build/ci \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DKHZ_ENABLE_LEDGER=ON \
+            -DKHZ_BUILD_SELFTEST=ON \
+            -DKHZ_BUILD_TESTS=ON \
+            -DKHZ_BUILD_SHARED=ON
+
+      - name: Build
+        run: cmake --build build/ci --parallel
+
+      - name: Native tests
+        run: ctest --test-dir build/ci --output-on-failure
+
+      - name: Managed exact-literal test
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci
+        run: dotnet run --project tests/dotnet/KhzExactLiteral/KhzExactLiteral.csproj -c Release
+
+      - name: Managed formula-cell test
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci
+        run: dotnet run --project tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake python3 libsqlite3-dev libasan8 libubsan1
+
+      - name: Configure ASAN + UBSAN
+        run: |
+          cmake -S . -B build/sanitize \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DKHZ_ENABLE_LEDGER=ON \
+            -DKHZ_BUILD_SELFTEST=ON \
+            -DKHZ_BUILD_TESTS=ON \
+            -DKHZ_BUILD_SHARED=OFF \
+            -DKHZ_ENABLE_ASAN=ON \
+            -DKHZ_ENABLE_UBSAN=ON
+
+      - name: Build
+        run: cmake --build build/sanitize --parallel
+
+      - name: Sanitized tests
+        run: ctest --test-dir build/sanitize --output-on-failure
