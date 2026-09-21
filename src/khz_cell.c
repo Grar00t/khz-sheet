@@ -149,8 +149,6 @@ KhzSheetStatus khz_cell_set_formula(KhzCell *cell, const char *formula, uint32_t
     cell->formula = formula;
     cell->formula_len = len;
 
-    /* A formula with no computed value is behind by definition. The flag says
-       so rather than letting a zero look like a result. */
     cell->flags |= KHZ_CELL_FLAG_DIRTY;
     return KHZ_SHEET_OK;
 }
@@ -162,15 +160,19 @@ KhzSheetStatus khz_cell_digest(const KhzCell *cell,
     KhzSha256 ctx;
     KhzHashStatus hash;
     unsigned char header[64];
+    uint32_t proof_flags;
     size_t at = (size_t)0;
 
     if (cell == NULL || prev == NULL || out == NULL) {
         return KHZ_SHEET_ERR_NULL;
     }
 
-    /* Fixed-width fields first, lengths before the variable-length tails. Two
-       distinct cells cannot share a pre-image: the lengths make the
-       concatenation unambiguous. */
+    /* Only flags that describe committed semantic state enter the digest.
+       DIRTY is scheduler/cache state: dependency invalidation may set it and
+       recalculation may clear it without either transition being a cell edit.
+       Hashing it would make ordinary invalidation look like tampering. */
+    proof_flags = cell->flags & KHZ_CELL_PROOF_FLAGS_MASK;
+
     khz_store_le32(header + at, cell->col);            at += 4u;
     khz_store_le32(header + at, cell->row);            at += 4u;
     khz_store_le32(header + at, cell->kind);           at += 4u;
@@ -180,7 +182,7 @@ KhzSheetStatus khz_cell_digest(const KhzCell *cell,
     khz_store_le32(header + at, cell->text_len);       at += 4u;
     khz_store_le32(header + at, cell->formula_len);    at += 4u;
     khz_store_le32(header + at, cell->bool_value);     at += 4u;
-    khz_store_le32(header + at, cell->flags);          at += 4u;
+    khz_store_le32(header + at, proof_flags);          at += 4u;
     khz_store_le64(header + at, cell->revision);       at += 8u;
 
     hash = khz_sha256_init(&ctx);
@@ -241,8 +243,6 @@ KhzSheetStatus khz_cell_commit(KhzCell *cell,
 
     status = khz_cell_digest(cell, prev, digest);
     if (status != KHZ_SHEET_OK) {
-        /* Put the revision back. A failed commit must leave no trace, or the
-           next successful one would chain onto a state that never existed. */
         cell->revision -= (uint64_t)1;
         return status;
     }
@@ -262,8 +262,6 @@ KhzSheetStatus khz_cell_verify(const KhzCell *cell,
     }
 
     if (cell->revision == (uint64_t)0) {
-        /* Never committed. There is nothing to verify, and saying "OK" would
-           be a claim about a proof that was never made. */
         return KHZ_SHEET_ERR_STATE;
     }
 
