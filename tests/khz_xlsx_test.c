@@ -297,7 +297,27 @@ int main(int argc, char **argv)
         fail("arena", "the arena rejected an allocation");
     }
 
-    khz_xlsx_reader_reset(&reader);
+    /* The reader was deliberately bound to the sheet arena above. Once the
+     * sheet has been parsed, that mark predates future sheet allocations too.
+     * Releasing it would invalidate payload pointers owned by live cells. A
+     * safe reset must refuse instead of rewinding shared live state. */
+    st = khz_sheet_set_text(&sheet, 10u, 30u, "survives-reader-reset", (size_t)21);
+    if (st != KHZ_SHEET_OK) {
+        fail("shared arena setup", khz_sheet_status_name(st));
+    }
+
+    st = khz_xlsx_reader_reset(&reader);
+    printf("reset       = %s (shared sheet arena)\n", khz_sheet_status_name(st));
+    if (st != KHZ_SHEET_ERR_STATE) {
+        fail("reset", "shared live sheet arena was released instead of refused");
+    }
+
+    failed_index = 0;
+    st = khz_sheet_verify_chain(&sheet, &failed_index);
+    if (st != KHZ_SHEET_OK) {
+        fail("reset", "proof chain changed after refused shared-arena reset");
+    }
+
     khz_sheet_destroy(&sheet);
     free(bytes);
 
