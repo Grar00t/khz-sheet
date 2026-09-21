@@ -114,6 +114,44 @@ namespace KHZ.Sheet.Tests
             }
         }
 
+        private static void DirtyFlagDoesNotInvalidateProof()
+        {
+            NativeSheet? sheet = CreateSheet();
+            if (sheet == null)
+            {
+                return;
+            }
+
+            using (sheet)
+            {
+                Console.WriteLine("dirty cache state vs proof:");
+                Expect(sheet.SetInt64(0u, 0u, 10L) == SheetStatus.Ok, "A1 = 10");
+                Expect(Install(sheet, 1u, 0u, "A1") == SheetStatus.Ok, "B1 = A1");
+                Expect(sheet.TryRecalculate(out ulong first) == SheetStatus.Ok, "initial recalc");
+                Expect(first >= 1UL, "initial formula evaluated");
+                Expect(sheet.VerifyChain(out nuint before) == SheetStatus.Ok,
+                       "proof valid while clean at index " + (ulong)before);
+
+                Expect(sheet.SetInt64(0u, 0u, 11L) == SheetStatus.Ok,
+                       "A1 = 11 marks B1 dirty");
+                Expect(sheet.TryGetCell(1u, 0u, out KhzCellNative dirty) == SheetStatus.Ok
+                       && dirty.IsDirty,
+                       "B1 is dirty before recalculation");
+
+                SheetStatus pendingProof = sheet.VerifyChain(out nuint pendingIndex);
+                Expect(pendingProof == SheetStatus.Ok,
+                       "proof remains valid while B1 is dirty -> " + pendingProof
+                       + " at index " + (ulong)pendingIndex);
+
+                Expect(sheet.TryRecalculate(out ulong second) == SheetStatus.Ok,
+                       "recalculate dirty B1");
+                Expect(second >= 1UL, "dirty formula evaluated");
+                Expect(IsValue(sheet, 1u, 0u, 11L, 1L), "B1 = 11/1");
+                Expect(sheet.VerifyChain(out nuint after) == SheetStatus.Ok,
+                       "proof valid after recalculation at index " + (ulong)after);
+            }
+        }
+
         private static int Main()
         {
             SheetStatus abi = KhzAbi.Verify(out string detail);
@@ -125,6 +163,7 @@ namespace KHZ.Sheet.Tests
 
             FormulaToFormula();
             FormulaToValue();
+            DirtyFlagDoesNotInvalidateProof();
 
             Console.WriteLine(failures == 0 ? "ALL PASS failures=0" : "FAIL failures=" + failures);
             return failures == 0 ? 0 : 1;
