@@ -33,6 +33,7 @@ jobs:
         run: |
           $env:CFLAGS = "/std:c11 /experimental:c11atomics"
           cmake -S . -B build/windows-tests `
+            -DKHZ_ENABLE_AVX2=OFF `
             -DKHZ_ENABLE_LEDGER=OFF `
             -DKHZ_BUILD_SELFTEST=ON `
             -DKHZ_BUILD_TESTS=ON `
@@ -59,4 +60,5 @@ jobs:
 
           dotnet run --project tests/dotnet/KhzExactLiteral/KhzExactLiteral.csproj -c Release
           dotnet run --project tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release
+          dotnet run --project tests/dotnet/KhzDependencyRewrite/KhzDependencyRewrite.csproj -c Release
           dotnet run --project tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj -c Release
