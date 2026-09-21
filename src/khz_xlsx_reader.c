@@ -265,6 +265,16 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 		return status;
 	}
 
+	/* XLSX is a single ZIP file. Split/multi-disk archives need bytes from
+	   other volumes, so interpreting their EOCD as if every record were local
+	   would validate the wrong address space. Reject them before using counts
+	   or offsets. A mismatched entries-on-this-disk count is the same case. */
+	if (khz_load_le16(raw + eocd + 4) != (uint16_t)0
+	    || khz_load_le16(raw + eocd + 6) != (uint16_t)0
+	    || khz_load_le16(raw + eocd + 8) != khz_load_le16(raw + eocd + 10)) {
+		return KHZ_SHEET_ERR_UNSUPPORTED;
+	}
+
 	total = (size_t)khz_load_le16(raw + eocd + 10);
 	cd_size = (size_t)khz_load_le32(raw + eocd + 12);
 	cd_offset = (size_t)khz_load_le32(raw + eocd + 16);
