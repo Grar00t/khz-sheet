@@ -81,12 +81,21 @@ static KhzSheetStatus load_status(const unsigned char *bytes, size_t size)
     return status;
 }
 
+static int expect_status(const char *what, KhzSheetStatus got, KhzSheetStatus want)
+{
+    if (got == want) return 0;
+    fprintf(stderr, "FAIL %s: got %s want %s\n",
+            what, khz_sheet_status_name(got), khz_sheet_status_name(want));
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     unsigned char *bytes;
     size_t size = 0;
     size_t eocd = 0;
     KhzSheetStatus status;
+    int failures = 0;
 
     if (argc != 2) {
         fprintf(stderr, "usage: khz_xlsx_cd_size_test <fixture.xlsx>\n");
@@ -104,13 +113,8 @@ int main(int argc, char **argv)
        any record outside that declared extent. */
     put_le32(bytes + eocd + 12, 1u);
     status = load_status(bytes, size);
+    failures += expect_status("mutated cd_size", status, KHZ_SHEET_ERR_FORMAT);
     free(bytes);
-
-    if (status != KHZ_SHEET_ERR_FORMAT) {
-        fprintf(stderr, "FAIL mutated cd_size: got %s want ERR_FORMAT\n",
-                khz_sheet_status_name(status));
-        return 1;
-    }
 
     bytes = read_file(argv[1], &size);
     if (bytes == NULL || !find_eocd(bytes, size, &eocd)) {
@@ -127,14 +131,76 @@ int main(int argc, char **argv)
     }
     put_le16(bytes + eocd + 4, 1u);
     status = load_status(bytes, size);
+    failures += expect_status("multi-disk EOCD", status, KHZ_SHEET_ERR_UNSUPPORTED);
     free(bytes);
 
-    if (status != KHZ_SHEET_ERR_UNSUPPORTED) {
-        fprintf(stderr, "FAIL multi-disk EOCD: got %s want ERR_UNSUPPORTED\n",
-                khz_sheet_status_name(status));
+    bytes = read_file(argv[1], &size);
+    if (bytes == NULL || !find_eocd(bytes, size, &eocd)) {
+        free(bytes);
+        return 2;
+    }
+
+    /* The central directory and the local header describe the same entry. If
+       their names disagree, selecting one side creates parser-confusion
+       semantics. Mutate one byte of the first local name while leaving the
+       central name and payload untouched; a strict reader must reject it. */
+    {
+        size_t central = (size_t)le32(bytes + eocd + 16);
+        size_t local;
+        size_t local_name_len;
+        size_t central_name_len;
+        if (central > size || size - central < (size_t)46
+            || le32(bytes + central) != KHZ_XLSX_SIG_CENTRAL) {
+            free(bytes);
+            return 2;
+        }
+        local = (size_t)le32(bytes + central + 42);
+        central_name_len = (size_t)le16(bytes + central + 28);
+        if (local > size || size - local < (size_t)30
+            || le32(bytes + local) != KHZ_XLSX_SIG_LOCAL) {
+            free(bytes);
+            return 2;
+        }
+        local_name_len = (size_t)le16(bytes + local + 26);
+        if (local_name_len == 0 || local_name_len != central_name_len
+            || local_name_len > size - (local + (size_t)30)) {
+            free(bytes);
+            return 2;
+        }
+        bytes[local + (size_t)30] ^= (unsigned char)1u;
+    }
+    status = load_status(bytes, size);
+    failures += expect_status("central/local filename mismatch", status, KHZ_SHEET_ERR_FORMAT);
+    free(bytes);
+
+    bytes = read_file(argv[1], &size);
+    if (bytes == NULL || !find_eocd(bytes, size, &eocd)) {
+        free(bytes);
+        return 2;
+    }
+
+    /* EOCD comment length is the framing contract for the tail of the archive.
+       Appending bytes without increasing that field must not be accepted as a
+       second interpretation of the same ZIP. */
+    {
+        unsigned char *extended = (unsigned char *)malloc(size + (size_t)4);
+        if (extended == NULL) {
+            free(bytes);
+            return 2;
+        }
+        memcpy(extended, bytes, size);
+        memcpy(extended + size, "JUNK", (size_t)4);
+        status = load_status(extended, size + (size_t)4);
+        failures += expect_status("trailing bytes after EOCD", status, KHZ_SHEET_ERR_FORMAT);
+        free(extended);
+    }
+    free(bytes);
+
+    if (failures != 0) {
+        fprintf(stderr, "FAILURES=%d\n", failures);
         return 1;
     }
 
-    printf("ALL PASS cd_size and multi-disk EOCD rejected\n");
+    printf("ALL PASS strict central-directory and EOCD framing checks\n");
     return 0;
 }
