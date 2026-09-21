@@ -131,9 +131,9 @@ namespace KHZ.Sheet.Tests
 				Expect(p2 == SheetStatus.Ok, "D1 accepted as " + negativeAccepted);
 				Expect(p3 == SheetStatus.Ok, "E1 accepted as " + fractionalAccepted);
 
-				SheetStatus powerRecalc = sheet.TryRecalculate(out ulong powerEvaluated);
-				Expect(powerRecalc == SheetStatus.Ok, "power recalculate -> " + powerRecalc);
-				Expect(powerEvaluated >= 3UL, "power evaluated = " + powerEvaluated);
+				SheetStatus pRecalc = sheet.TryRecalculate(out ulong pEvaluated);
+				Expect(pRecalc == SheetStatus.Ok, "power recalculate -> " + pRecalc);
+				Expect(pEvaluated >= 3UL, "power evaluated = " + pEvaluated);
 
 				if (sheet.TryGetCell(2u, 0u, out KhzCellNative c1) == SheetStatus.Ok)
 				{
@@ -160,6 +160,56 @@ namespace KHZ.Sheet.Tests
 				else
 				{
 					Fail("read E1");
+				}
+
+				Console.WriteLine("native source numeric parity:");
+				SheetStatus n1 = Install(sheet, 5u, 0u, "1e3", out string sciAccepted);
+				SheetStatus n2 = Install(sheet, 6u, 0u, "2.5E-4", out string sciNegAccepted);
+				SheetStatus n3 = Install(sheet, 7u, 0u, "50%", out string percentAccepted);
+				SheetStatus n4 = Install(sheet, 8u, 0u, "0.5%", out string percentDecimalAccepted);
+				Expect(n1 == SheetStatus.Ok, "F1 accepted as " + sciAccepted);
+				Expect(n2 == SheetStatus.Ok, "G1 accepted as " + sciNegAccepted);
+				Expect(n3 == SheetStatus.Ok, "H1 accepted as " + percentAccepted);
+				Expect(n4 == SheetStatus.Ok, "I1 accepted as " + percentDecimalAccepted);
+
+				SheetStatus nRecalc = sheet.TryRecalculate(out ulong nEvaluated);
+				Expect(nRecalc == SheetStatus.Ok, "numeric parity recalculate -> " + nRecalc);
+				Expect(nEvaluated >= 4UL, "numeric parity evaluated = " + nEvaluated);
+
+				if (sheet.TryGetCell(5u, 0u, out KhzCellNative f1) == SheetStatus.Ok)
+				{
+					Expect(f1.Value.Num == 1000L && f1.Value.Den == 1L, "F1 = 1000/1");
+				}
+				else
+				{
+					Fail("read F1");
+				}
+
+				if (sheet.TryGetCell(6u, 0u, out KhzCellNative g1) == SheetStatus.Ok)
+				{
+					Expect(g1.Value.Num == 1L && g1.Value.Den == 4000L, "G1 = 1/4000");
+				}
+				else
+				{
+					Fail("read G1");
+				}
+
+				if (sheet.TryGetCell(7u, 0u, out KhzCellNative h1) == SheetStatus.Ok)
+				{
+					Expect(h1.Value.Num == 1L && h1.Value.Den == 2L, "H1 = 1/2");
+				}
+				else
+				{
+					Fail("read H1");
+				}
+
+				if (sheet.TryGetCell(8u, 0u, out KhzCellNative i1) == SheetStatus.Ok)
+				{
+					Expect(i1.Value.Num == 1L && i1.Value.Den == 200L, "I1 = 1/200");
+				}
+				else
+				{
+					Fail("read I1");
 				}
 
 				Console.WriteLine("chain:");
