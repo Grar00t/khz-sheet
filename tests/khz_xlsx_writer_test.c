@@ -4,6 +4,7 @@
 #include "khz_arena.h"
 #include "khz_sheet.h"
 #include "khz_xlsx.h"
+#include "khz_xlsx_reader.h"
 
 static int failures;
 
@@ -73,15 +74,21 @@ static int validate_zip_directory(const unsigned char *bytes, size_t length)
 int main(void)
 {
     KhzSheet sheet;
+    KhzSheet roundtrip;
     KhzArena scratch_a;
     KhzArena scratch_b;
+    KhzArena reader_arena;
+    KhzXlsxReader reader;
     KhzRational third;
+    KhzRational tiny;
+    const KhzCell *roundtrip_cell = NULL;
     const unsigned char *a = NULL;
     const unsigned char *b = NULL;
     size_t a_len = 0;
     size_t b_len = 0;
     KhzXlsxReport ra;
     KhzXlsxReport rb;
+    KhzSheetStatus status;
 
     if (khz_sheet_init(&sheet, (size_t)1 << 20, (size_t)32) != KHZ_SHEET_OK) return 2;
     if (khz_arena_init(&scratch_a, (size_t)8 << 20) != KHZ_ARENA_OK) {
@@ -99,6 +106,10 @@ int main(void)
         || khz_sheet_set_rational(&sheet, 1u, 0u, third) != KHZ_SHEET_OK) {
         fail("set rational");
     }
+    if (khz_rational_make(1, 100000000, &tiny) != KHZ_SHEET_OK
+        || khz_sheet_set_rational(&sheet, 2u, 0u, tiny) != KHZ_SHEET_OK) {
+        fail("set exponent-sized rational");
+    }
     if (khz_sheet_set_text(&sheet, 0u, 1u, "alpha & <beta>", (size_t)14) != KHZ_SHEET_OK) {
         fail("set text");
     }
@@ -115,7 +126,30 @@ int main(void)
     if (a_len != b_len || a == NULL || b == NULL || memcmp(a, b, a_len) != 0) {
         fail("byte deterministic build");
     }
-    if (ra.lossy_cells != 1u || rb.lossy_cells != 1u) fail("lossy report");
+    if (ra.lossy_cells != 2u || rb.lossy_cells != 2u) fail("lossy report");
+
+    if (khz_arena_init(&reader_arena, (size_t)8 << 20) != KHZ_ARENA_OK) {
+        fail("reader arena init");
+    } else if (khz_sheet_init(&roundtrip, (size_t)1 << 20, (size_t)32) != KHZ_SHEET_OK) {
+        fail("roundtrip sheet init");
+        khz_arena_destroy(&reader_arena);
+    } else {
+        status = khz_xlsx_reader_init(&reader, &reader_arena);
+        if (status == KHZ_SHEET_OK) status = khz_xlsx_reader_read(&reader, &roundtrip, a, a_len);
+        if (status != KHZ_SHEET_OK) {
+            fail("writer reader roundtrip");
+        } else {
+            status = khz_sheet_get(&roundtrip, 2u, 0u, &roundtrip_cell);
+            if (status != KHZ_SHEET_OK || roundtrip_cell == NULL
+                || roundtrip_cell->kind != (uint32_t)KHZ_CELL_RATIONAL
+                || roundtrip_cell->value.num != (int64_t)1
+                || roundtrip_cell->value.den != (int64_t)100000000) {
+                fail("exponent numeric roundtrip");
+            }
+        }
+        khz_sheet_destroy(&roundtrip);
+        khz_arena_destroy(&reader_arena);
+    }
 
     khz_arena_destroy(&scratch_b);
     khz_arena_destroy(&scratch_a);
