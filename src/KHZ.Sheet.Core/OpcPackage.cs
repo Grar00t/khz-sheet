@@ -193,7 +193,10 @@ namespace KHZ.Sheet.Core
 				return SheetStatus.ErrMissing;
 			}
 
-			_parts[partName] = content;
+			/* The package owns its part bytes. Retaining the caller's array would
+			   let later external mutation change the package without going through
+			   this method, contradicting the single-mutation boundary above. */
+			_parts[partName] = (byte[])content.Clone();
 			return SheetStatus.Ok;
 		}
 
@@ -225,6 +228,10 @@ namespace KHZ.Sheet.Core
 						if (!_parts.TryGetValue(name, out bytes))
 						{
 							return SheetStatus.ErrMissing;
+						}
+						if (bytes.Length == 0)
+						{
+							return SheetStatus.ErrFormat;
 						}
 
 						ZipArchiveEntry entry = archive.CreateEntry(name, CompressionLevel.Optimal);

@@ -16,13 +16,29 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Native tests on Windows
+        shell: pwsh
+        run: |
+          $env:CFLAGS = "/std:c11 /experimental:c11atomics"
+          cmake -S . -B build/windows-tests `
+            -DKHZ_ENABLE_LEDGER=OFF `
+            -DKHZ_BUILD_SELFTEST=ON `
+            -DKHZ_BUILD_TESTS=ON `
+            -DKHZ_BUILD_SHARED=OFF
+          cmake --build build/windows-tests --config Release --parallel
+          ctest --test-dir build/windows-tests -C Release --output-on-failure
 
       - name: Build native core and desktop app
         shell: pwsh
@@ -43,3 +59,4 @@ jobs:
 
           dotnet run --project tests/dotnet/KhzExactLiteral/KhzExactLiteral.csproj -c Release
           dotnet run --project tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release
+          dotnet run --project tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj -c Release

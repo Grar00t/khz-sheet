@@ -54,6 +54,9 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci
         run: dotnet run --project tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release
 
+      - name: Managed OPC package test
+        run: dotnet run --project tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj -c Release
+
   sanitizers:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
