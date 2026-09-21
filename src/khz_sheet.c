@@ -260,6 +260,35 @@ static KhzSheetStatus khz_sheet_copy_text(KhzSheet *sheet, const char *text, siz
     return KHZ_SHEET_OK;
 }
 
+/* Text/formula setters own arena bytes for their source. Validate both the
+   source contract and the destination before taking those bytes. Otherwise a
+   rejected coordinate, full grid, or exhausted revision counter would consume
+   permanent arena space even though the setter returned failure. */
+static KhzSheetStatus khz_sheet_text_source_preflight(const char *text, size_t len)
+{
+    if (len != (size_t)0 && text == NULL) return KHZ_SHEET_ERR_NULL;
+    if (len > (size_t)UINT32_MAX) return KHZ_SHEET_ERR_LIMIT;
+    return KHZ_SHEET_OK;
+}
+
+static KhzSheetStatus khz_sheet_target_preflight(KhzSheet *sheet,
+                                                 uint32_t col, uint32_t row)
+{
+    KhzCell *cell = NULL;
+    KhzSheetStatus status = khz_sheet_commit_budget(sheet);
+
+    if (status != KHZ_SHEET_OK) return status;
+
+    status = khz_grid_find(&sheet->grid, col, row, NULL, &cell);
+    if (status == KHZ_SHEET_OK) return khz_sheet_commit_preflight(sheet, cell);
+    if (status != KHZ_SHEET_ERR_MISSING) return status;
+
+    if (khz_grid_count(&sheet->grid) >= khz_grid_capacity(&sheet->grid)) {
+        return KHZ_SHEET_ERR_LIMIT;
+    }
+    return KHZ_SHEET_OK;
+}
+
 KhzSheetStatus khz_sheet_set_rational(KhzSheet *sheet, uint32_t col, uint32_t row,
                                      KhzRational value)
 {
@@ -303,15 +332,15 @@ KhzSheetStatus khz_sheet_set_text(KhzSheet *sheet, uint32_t col, uint32_t row,
     KhzSheetStatus status = khz_sheet_ready(sheet);
 
     if (status != KHZ_SHEET_OK) return status;
-    status = khz_sheet_commit_budget(sheet);
+    status = khz_sheet_text_source_preflight(text, len);
+    if (status != KHZ_SHEET_OK) return status;
+    status = khz_sheet_target_preflight(sheet, col, row);
     if (status != KHZ_SHEET_OK) return status;
 
     status = khz_sheet_copy_text(sheet, text, len, &copy);
     if (status != KHZ_SHEET_OK) return status;
 
     status = khz_grid_upsert(&sheet->grid, col, row, &index, &cell);
-    if (status != KHZ_SHEET_OK) return status;
-    status = khz_sheet_commit_preflight(sheet, cell);
     if (status != KHZ_SHEET_OK) return status;
 
     status = khz_cell_set_text(cell, copy, (uint32_t)len);
@@ -381,15 +410,15 @@ KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row
     KhzSheetStatus status = khz_sheet_ready(sheet);
 
     if (status != KHZ_SHEET_OK) return status;
-    status = khz_sheet_commit_budget(sheet);
+    status = khz_sheet_text_source_preflight(formula, len);
+    if (status != KHZ_SHEET_OK) return status;
+    status = khz_sheet_target_preflight(sheet, col, row);
     if (status != KHZ_SHEET_OK) return status;
 
     status = khz_sheet_copy_text(sheet, formula, len, &copy);
     if (status != KHZ_SHEET_OK) return status;
 
     status = khz_grid_upsert(&sheet->grid, col, row, &index, &cell);
-    if (status != KHZ_SHEET_OK) return status;
-    status = khz_sheet_commit_preflight(sheet, cell);
     if (status != KHZ_SHEET_OK) return status;
 
     status = khz_cell_set_formula(cell, copy, (uint32_t)len);
