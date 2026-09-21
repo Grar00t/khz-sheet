@@ -5,12 +5,23 @@
 #include "khz_arena.h"
 #include "khz_xlsx_reader.h"
 
+static uint16_t le16(const unsigned char *p)
+{
+    return (uint16_t)((uint16_t)p[0] | (uint16_t)((uint16_t)p[1] << 8));
+}
+
 static uint32_t le32(const unsigned char *p)
 {
     return (uint32_t)p[0]
          | ((uint32_t)p[1] << 8)
          | ((uint32_t)p[2] << 16)
          | ((uint32_t)p[3] << 24);
+}
+
+static void put_le16(unsigned char *p, uint16_t value)
+{
+    p[0] = (unsigned char)(value & 0xffu);
+    p[1] = (unsigned char)((value >> 8) & 0xffu);
 }
 
 static void put_le32(unsigned char *p, uint32_t value)
@@ -55,13 +66,26 @@ static int find_eocd(const unsigned char *bytes, size_t size, size_t *offset)
     return 0;
 }
 
+static KhzSheetStatus load_status(const unsigned char *bytes, size_t size)
+{
+    KhzArena arena;
+    KhzXlsxReader reader;
+    KhzSheetStatus status;
+
+    if (khz_arena_init(&arena, (size_t)8 << 20) != KHZ_ARENA_OK) {
+        return KHZ_SHEET_ERR_MEMORY;
+    }
+    status = khz_xlsx_reader_init(&reader, &arena);
+    if (status == KHZ_SHEET_OK) status = khz_xlsx_reader_load(&reader, bytes, size);
+    khz_arena_destroy(&arena);
+    return status;
+}
+
 int main(int argc, char **argv)
 {
     unsigned char *bytes;
     size_t size = 0;
     size_t eocd = 0;
-    KhzArena arena;
-    KhzXlsxReader reader;
     KhzSheetStatus status;
 
     if (argc != 2) {
@@ -79,15 +103,7 @@ int main(int argc, char **argv)
        itself is only one byte long. A strict reader must reject before walking
        any record outside that declared extent. */
     put_le32(bytes + eocd + 12, 1u);
-
-    if (khz_arena_init(&arena, (size_t)8 << 20) != KHZ_ARENA_OK) {
-        free(bytes);
-        return 2;
-    }
-    status = khz_xlsx_reader_init(&reader, &arena);
-    if (status == KHZ_SHEET_OK) status = khz_xlsx_reader_load(&reader, bytes, size);
-
-    khz_arena_destroy(&arena);
+    status = load_status(bytes, size);
     free(bytes);
 
     if (status != KHZ_SHEET_ERR_FORMAT) {
@@ -96,6 +112,29 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf("ALL PASS cd_size rejected as ERR_FORMAT\n");
+    bytes = read_file(argv[1], &size);
+    if (bytes == NULL || !find_eocd(bytes, size, &eocd)) {
+        free(bytes);
+        return 2;
+    }
+
+    /* XLSX is one ZIP file. A nonzero EOCD disk number declares a split or
+       multi-disk archive, which this reader cannot resolve from one byte
+       buffer. It must be refused rather than silently interpreted as local. */
+    if (le16(bytes + eocd + 4) != 0u) {
+        free(bytes);
+        return 2;
+    }
+    put_le16(bytes + eocd + 4, 1u);
+    status = load_status(bytes, size);
+    free(bytes);
+
+    if (status != KHZ_SHEET_ERR_UNSUPPORTED) {
+        fprintf(stderr, "FAIL multi-disk EOCD: got %s want ERR_UNSUPPORTED\n",
+                khz_sheet_status_name(status));
+        return 1;
+    }
+
+    printf("ALL PASS cd_size and multi-disk EOCD rejected\n");
     return 0;
 }
