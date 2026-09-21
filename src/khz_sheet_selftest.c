@@ -67,6 +67,23 @@ int khz_sheet_selftest(void)
         }
     }
 
+    /* Comparison itself must not overflow. These two valid canonical
+       rationals are both just below one; direct cross-products exceed int64,
+       but their order is exact and representable: (M-1)/M > (M-2)/(M-1). */
+    {
+        KhzRational a;
+        KhzRational b;
+        int cmp = 0;
+
+        if (khz_rational_make(INT64_MAX - (int64_t)1, INT64_MAX, &a) != KHZ_SHEET_OK
+            || khz_rational_make(INT64_MAX - (int64_t)2,
+                                 INT64_MAX - (int64_t)1, &b) != KHZ_SHEET_OK
+            || khz_rational_compare(a, b, &cmp) != KHZ_SHEET_OK
+            || cmp <= 0) {
+            ++failures;
+        }
+    }
+
     /* The SIMD kernel must agree with the scalar fold and must refuse a sum
        that does not fit. */
     {
@@ -141,14 +158,12 @@ int khz_sheet_selftest(void)
                 ++local;
             }
 
-            /* AVERAGE(1, 2) is 3/2 exactly. */
             if (khz_sheet_avg(&sheet, 0u, 0u, 0u, 1u, &mean, &counted) != KHZ_SHEET_OK
                 || mean.num != (int64_t)3 || mean.den != (int64_t)2
                 || counted != (size_t)2) {
                 ++local;
             }
 
-            /* Text in the range is skipped, not coerced to zero. */
             if (khz_sheet_set_text(&sheet, 0u, 2u, "label", (size_t)5) != KHZ_SHEET_OK) {
                 ++local;
             }
@@ -163,10 +178,6 @@ int khz_sheet_selftest(void)
                 ++local;
             }
 
-            /* The Phase 94 regression: rewriting a cell that is not the most
-               recently inserted one used to make the chain unverifiable,
-               because the old check replayed insertion order and demanded
-               revision 1. Replaying the commit log must accept it. */
             {
                 KhzChainAudit audit;
 
@@ -176,7 +187,6 @@ int khz_sheet_selftest(void)
                 if (khz_sheet_audit_chain(&sheet, &audit) != KHZ_SHEET_OK) {
                     ++local;
                 }
-                /* One entry is now superseded: the first write to A1. */
                 if (audit.superseded != (uint64_t)1) {
                     ++local;
                 }
@@ -188,8 +198,6 @@ int khz_sheet_selftest(void)
                 }
             }
 
-            /* Tampering must still be caught. Editing a cell without
-               committing leaves its proof stale, and the audit must say so. */
             {
                 KhzCell *cell = NULL;
 
@@ -200,20 +208,16 @@ int khz_sheet_selftest(void)
                     KhzRational saved = cell->value;
 
                     cell->value.num += (int64_t)1;
-
                     if (khz_sheet_verify_chain(&sheet, NULL) == KHZ_SHEET_OK) {
                         ++local;
                     }
-
                     cell->value = saved;
-
                     if (khz_sheet_verify_chain(&sheet, NULL) != KHZ_SHEET_OK) {
                         ++local;
                     }
                 }
             }
 
-            /* Dirty marking follows the graph and touches formula cells only. */
             {
                 uint64_t dirtied = (uint64_t)0;
 
@@ -234,7 +238,6 @@ int khz_sheet_selftest(void)
                 }
             }
 
-            /* A cycle must be reported, not silently ordered. */
             if (khz_sheet_declare_dependency(&sheet, 2u, 0u, 2u, 1u) != KHZ_SHEET_OK
                 || khz_sheet_declare_dependency(&sheet, 2u, 1u, 2u, 0u) != KHZ_SHEET_OK) {
                 ++local;
@@ -248,8 +251,6 @@ int khz_sheet_selftest(void)
                 }
             }
 
-            /* Nothing may have reached the heap, and nothing may have been
-               rejected in a run this small. */
             if (khz_arena_rejections(&sheet.arena) != (uint64_t)0) {
                 ++local;
             }
