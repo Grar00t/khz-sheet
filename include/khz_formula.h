@@ -77,7 +77,7 @@ typedef enum KhzFormulaOp {
  *
  * The exponent must be an integer. Concretely, a POW node evaluates only when
  * its right child reduces to a rational with den == 1; anything else is
- * KHZ_SHEET_ERR_UNSUPPORTED from khz_formula_eval_strict and #NUM! from
+ * KHZ_SHEET_ERR_OVERFLOW from khz_formula_eval_strict and #NUM! from
  * khz_formula_eval.
  *
  * This refuses 2^0.5 and 8^(1/3) - both of which Excel answers. That is a
@@ -186,9 +186,8 @@ typedef struct KhzFormulaParseError {
  * #NUM! - use khz_formula_eval_strict.
  *
  * A non-integer exponent sits on the value side of that line: the cell shows
- * #NUM!, which is what Excel shows for a power it cannot produce, and
- * khz_formula_eval_strict reports KHZ_SHEET_ERR_UNSUPPORTED so a test can tell
- * "this engine will not answer that" apart from "the answer overflowed". */
+ * #NUM!, and khz_formula_eval_strict reports KHZ_SHEET_ERR_OVERFLOW because
+ * the exact rational value kind cannot represent the irrational result. */
 typedef struct KhzFormulaResult {
     uint32_t    kind;    /* KhzCellKind: RATIONAL or ERROR */
     uint32_t    error;   /* KhzCellError when kind is ERROR */
@@ -263,9 +262,8 @@ KhzSheetStatus khz_formula_eval(struct KhzSheet *sheet, const KhzFormula *formul
 
 /* As above, but a spreadsheet error is returned as its status code rather than
    converted into a value: #DIV/0! becomes KHZ_SHEET_ERR_DIVZERO, a text operand
-   becomes KHZ_SHEET_ERR_TYPE, an unrepresentable result becomes
-   KHZ_SHEET_ERR_OVERFLOW, and a non-integer exponent becomes
-   KHZ_SHEET_ERR_UNSUPPORTED. */
+   becomes KHZ_SHEET_ERR_TYPE, and an unrepresentable result (including a
+   non-integer exponent) becomes KHZ_SHEET_ERR_OVERFLOW. */
 KhzSheetStatus khz_formula_eval_strict(struct KhzSheet *sheet,
                                        const KhzFormula *formula,
                                        KhzRational *out);
