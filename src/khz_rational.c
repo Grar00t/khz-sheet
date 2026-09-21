@@ -82,6 +82,46 @@ static uint64_t khz_abs_u64(int64_t value)
     return value < 0 ? (uint64_t)(-value) : (uint64_t)value;
 }
 
+/* Exact ordering of two non-negative fractions without cross multiplication.
+
+   Each step compares the integer quotients from Euclid's algorithm. If they
+   match, the remaining fractional parts are inverted; inversion reverses the
+   order, so `sense` flips. All operands stay within the original uint64 range
+   and the loop terminates as the remainders shrink. This is effectively a
+   continued-fraction comparison and cannot overflow. */
+static int khz_fraction_compare_u64(uint64_t an, uint64_t ad,
+                                    uint64_t bn, uint64_t bd)
+{
+    int sense = 1;
+
+    for (;;) {
+        uint64_t aq = an / ad;
+        uint64_t ar = an % ad;
+        uint64_t bq = bn / bd;
+        uint64_t br = bn % bd;
+
+        if (aq < bq) {
+            return -sense;
+        }
+        if (aq > bq) {
+            return sense;
+        }
+
+        if (ar == (uint64_t)0 || br == (uint64_t)0) {
+            if (ar == (uint64_t)0 && br == (uint64_t)0) {
+                return 0;
+            }
+            return ar == (uint64_t)0 ? -sense : sense;
+        }
+
+        an = ad;
+        ad = ar;
+        bn = bd;
+        bd = br;
+        sense = -sense;
+    }
+}
+
 static void khz_store_le64(unsigned char *p, uint64_t value)
 {
     unsigned int i;
@@ -310,8 +350,7 @@ KhzSheetStatus khz_rational_div(KhzRational a, KhzRational b, KhzRational *out)
 
 KhzSheetStatus khz_rational_compare(KhzRational a, KhzRational b, int *cmp)
 {
-    int64_t left;
-    int64_t right;
+    int order;
 
     if (cmp == NULL) {
         return KHZ_SHEET_ERR_NULL;
@@ -320,26 +359,25 @@ KhzSheetStatus khz_rational_compare(KhzRational a, KhzRational b, int *cmp)
         return KHZ_SHEET_ERR_RANGE;
     }
 
-    /* Same denominator is the common case and needs no multiplication. */
     if (a.den == b.den) {
         *cmp = a.num < b.num ? -1 : (a.num > b.num ? 1 : 0);
         return KHZ_SHEET_OK;
     }
 
-    /* Different signs decide it without arithmetic. */
     if ((a.num < (int64_t)0) != (b.num < (int64_t)0)) {
         *cmp = a.num < b.num ? -1 : 1;
         return KHZ_SHEET_OK;
     }
 
-    if (khz_i64_mul(a.num, b.den, &left)) {
-        return KHZ_SHEET_ERR_OVERFLOW;
-    }
-    if (khz_i64_mul(b.num, a.den, &right)) {
-        return KHZ_SHEET_ERR_OVERFLOW;
+    order = khz_fraction_compare_u64(khz_abs_u64(a.num), (uint64_t)a.den,
+                                     khz_abs_u64(b.num), (uint64_t)b.den);
+
+    /* Negating both operands reverses their order. */
+    if (a.num < (int64_t)0) {
+        order = -order;
     }
 
-    *cmp = left < right ? -1 : (left > right ? 1 : 0);
+    *cmp = order;
     return KHZ_SHEET_OK;
 }
 
