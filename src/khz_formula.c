@@ -129,8 +129,6 @@ KhzSheetStatus khz_formula_range(KhzFormula *formula,
         return status;
     }
 
-    /* Normalised at construction: C1:A3 and A1:C3 are the same rectangle, and
-       two trees for one rectangle would digest differently. */
     node->col0 = col0 < col1 ? col0 : col1;
     node->col1 = col0 < col1 ? col1 : col0;
     node->row0 = row0 < row1 ? row0 : row1;
@@ -157,7 +155,6 @@ KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
         return KHZ_SHEET_ERR_NULL;
     }
 
-    /* Arity is enforced here rather than at evaluation. */
     switch (op) {
     case KHZ_FORMULA_ADD:
     case KHZ_FORMULA_SUB:
@@ -182,7 +179,6 @@ KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
         }
         break;
     default:
-        /* Leaves have dedicated constructors that fill their payload. */
         return KHZ_SHEET_ERR_UNSUPPORTED;
     }
 
@@ -279,8 +275,6 @@ KhzSheetStatus khz_formula_parse_ref(const char *text, size_t len,
         return KHZ_SHEET_ERR_FORMAT;
     }
 
-    /* $ is accepted and discarded. Absolute and relative name the same cell,
-       and there is no copy operation yet for the difference to affect. */
     if (i < len && text[i] == '$') {
         ++i;
     }
@@ -344,7 +338,6 @@ static void khz_parse_fail(KhzParser *p, const char *expected)
     }
 
     p->error->offset = p->pos;
-
     n = strlen(expected);
     if (n >= sizeof p->error->expected) {
         n = sizeof p->error->expected - (size_t)1;
@@ -380,6 +373,42 @@ static int khz_mul10_add(int64_t *acc, int digit)
 
     *acc = *acc * (int64_t)10 + (int64_t)digit;
     return 0;
+}
+
+static KhzSheetStatus khz_scale_decimal(KhzRational *value,
+                                        int negative_exponent,
+                                        uint64_t magnitude)
+{
+    uint64_t i;
+
+    if (value->num == (int64_t)0) {
+        value->den = (int64_t)1;
+        return KHZ_SHEET_OK;
+    }
+
+    for (i = (uint64_t)0; i < magnitude; ++i) {
+        if (!negative_exponent) {
+            if ((value->den % (int64_t)10) == (int64_t)0) {
+                value->den /= (int64_t)10;
+            } else {
+                if (value->num > INT64_MAX / (int64_t)10) {
+                    return KHZ_SHEET_ERR_OVERFLOW;
+                }
+                value->num *= (int64_t)10;
+            }
+        } else {
+            if ((value->num % (int64_t)10) == (int64_t)0) {
+                value->num /= (int64_t)10;
+            } else {
+                if (value->den > INT64_MAX / (int64_t)10) {
+                    return KHZ_SHEET_ERR_OVERFLOW;
+                }
+                value->den *= (int64_t)10;
+            }
+        }
+    }
+
+    return khz_rational_make(value->num, value->den, value);
 }
 
 static KhzSheetStatus khz_parse_number(KhzParser *p, KhzFormulaNode **out)
@@ -425,6 +454,41 @@ static KhzSheetStatus khz_parse_number(KhzParser *p, KhzFormulaNode **out)
     status = khz_rational_make(num, den, &value);
     if (status != KHZ_SHEET_OK) {
         return status;
+    }
+
+    if (p->pos < p->len && (p->src[p->pos] == 'e' || p->src[p->pos] == 'E')) {
+        uint64_t magnitude = (uint64_t)0;
+        size_t exponent_digits = (size_t)0;
+        int negative_exponent = 0;
+
+        ++p->pos;
+        if (p->pos < p->len && (p->src[p->pos] == '+' || p->src[p->pos] == '-')) {
+            negative_exponent = p->src[p->pos] == '-';
+            ++p->pos;
+        }
+
+        while (p->pos < p->len && khz_is_digit(p->src[p->pos])) {
+            uint64_t digit = (uint64_t)(p->src[p->pos] - '0');
+
+            if (magnitude > (UINT64_MAX - digit) / (uint64_t)10) {
+                khz_parse_fail(p, "exponent in range");
+                return KHZ_SHEET_ERR_OVERFLOW;
+            }
+            magnitude = magnitude * (uint64_t)10 + digit;
+            ++exponent_digits;
+            ++p->pos;
+        }
+
+        if (exponent_digits == (size_t)0) {
+            khz_parse_fail(p, "exponent digit");
+            return KHZ_SHEET_ERR_FORMAT;
+        }
+
+        status = khz_scale_decimal(&value, negative_exponent, magnitude);
+        if (status != KHZ_SHEET_OK) {
+            khz_parse_fail(p, "number in range");
+            return status;
+        }
     }
 
     return khz_formula_const(p->formula, value, out);
@@ -617,6 +681,43 @@ static KhzSheetStatus khz_parse_primary(KhzParser *p, KhzFormulaNode **out)
     return KHZ_SHEET_ERR_FORMAT;
 }
 
+static KhzSheetStatus khz_parse_postfix(KhzParser *p, KhzFormulaNode **out)
+{
+    KhzFormulaNode *current = NULL;
+    KhzSheetStatus status = khz_parse_primary(p, &current);
+
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    while (khz_peek(p) == '%') {
+        KhzRational hundred;
+        KhzFormulaNode *divisor = NULL;
+        KhzFormulaNode *pair[2];
+
+        ++p->pos;
+        status = khz_rational_make((int64_t)100, (int64_t)1, &hundred);
+        if (status != KHZ_SHEET_OK) {
+            return status;
+        }
+        status = khz_formula_const(p->formula, hundred, &divisor);
+        if (status != KHZ_SHEET_OK) {
+            return status;
+        }
+
+        pair[0] = current;
+        pair[1] = divisor;
+        status = khz_formula_node(p->formula, KHZ_FORMULA_DIV,
+                                  pair, (size_t)2, &current);
+        if (status != KHZ_SHEET_OK) {
+            return status;
+        }
+    }
+
+    *out = current;
+    return KHZ_SHEET_OK;
+}
+
 static KhzSheetStatus khz_parse_unary(KhzParser *p, KhzFormulaNode **out)
 {
     KhzSheetStatus status;
@@ -648,11 +749,9 @@ static KhzSheetStatus khz_parse_unary(KhzParser *p, KhzFormulaNode **out)
         return khz_parse_unary(p, out);
     }
 
-    return khz_parse_primary(p, out);
+    return khz_parse_postfix(p, out);
 }
 
-/* Power binds above multiplication and, like the managed parser, is left
-   associative. Unary signs are parsed before power so -2^2 is (-2)^2. */
 static KhzSheetStatus khz_parse_power(KhzParser *p, KhzFormulaNode **out)
 {
     KhzFormulaNode *left = NULL;
