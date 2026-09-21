@@ -42,6 +42,20 @@ int main(void)
     expect_status("invalid error coordinate remains missing",
                   khz_sheet_get(&sheet, 0u, 1u, &cell), KHZ_SHEET_ERR_MISSING);
 
+    {
+        size_t before = khz_arena_used(khz_sheet_arena(&sheet));
+
+        expect_status("text outside grid", khz_sheet_set_text(&sheet,
+                      KHZ_GRID_MAX_COLUMNS, 0u, "x", (size_t)1), KHZ_SHEET_ERR_LIMIT);
+        expect_true("invalid text consumes no arena",
+                    khz_arena_used(khz_sheet_arena(&sheet)) == before);
+
+        expect_status("formula outside grid", khz_sheet_set_formula(&sheet,
+                      KHZ_GRID_MAX_COLUMNS, 0u, "1+1", (size_t)3), KHZ_SHEET_ERR_LIMIT);
+        expect_true("invalid formula consumes no arena",
+                    khz_arena_used(khz_sheet_arena(&sheet)) == before);
+    }
+
     expect_status("seed A1", khz_sheet_set_i64(&sheet, 0u, 0u, 7), KHZ_SHEET_OK);
     expect_status("get A1", khz_sheet_get(&sheet, 0u, 0u, &cell), KHZ_SHEET_OK);
 
@@ -72,6 +86,28 @@ int main(void)
                     memcmp(sheet.proof, old_sheet_proof, sizeof old_sheet_proof) == 0);
         expect_true("log recorded unchanged after overflow", sheet.log.recorded == old_recorded);
         expect_true("log cursor unchanged after overflow", sheet.log.next == old_next);
+    }
+
+    {
+        KhzSheet tight;
+        size_t before;
+
+        expect_status("tight init", khz_sheet_init(&tight, (size_t)1 << 20, (size_t)1),
+                      KHZ_SHEET_OK);
+        expect_status("tight seed", khz_sheet_set_i64(&tight, 0u, 0u, 1), KHZ_SHEET_OK);
+        before = khz_arena_used(khz_sheet_arena(&tight));
+
+        expect_status("text at full capacity", khz_sheet_set_text(&tight, 1u, 0u,
+                      "rejected", (size_t)8), KHZ_SHEET_ERR_LIMIT);
+        expect_true("full-capacity text consumes no arena",
+                    khz_arena_used(khz_sheet_arena(&tight)) == before);
+
+        expect_status("formula at full capacity", khz_sheet_set_formula(&tight, 1u, 0u,
+                      "A1+1", (size_t)4), KHZ_SHEET_ERR_LIMIT);
+        expect_true("full-capacity formula consumes no arena",
+                    khz_arena_used(khz_sheet_arena(&tight)) == before);
+
+        khz_sheet_destroy(&tight);
     }
 
     {
