@@ -11,8 +11,10 @@
  * A part that does not match the shapes below yields counted, unsupported
  * cells rather than wrong values.
  *
- * Every buffer comes from the reader's arena, inside the mark taken at load,
- * so khz_xlsx_reader_reset gives all of it back.
+ * Every buffer comes from the reader's arena, inside the mark taken at load.
+ * When that arena is separate scratch storage, khz_xlsx_reader_reset can hand
+ * the load back. When it is also the destination sheet arena, parse_sheet
+ * marks the reader non-releasable so reset cannot rewind live cell payloads.
  */
 
 #include <string.h>
@@ -32,6 +34,12 @@
    hostile exponents bounded; representability is still decided by the exact
    rational multiply below, not by this coarse limit. */
 #define KHZ_XLSX_MAX_EXPONENT_STEPS ((uint32_t)38)
+
+/* Sentinel outside every valid arena mark. khz_arena_release rejects marks
+   greater than the current offset without changing the arena. This lets the
+   existing reset path fail closed when reader storage and live sheet storage
+   share one arena, without changing the public reader layout. */
+#define KHZ_XLSX_SHARED_ARENA_MARK ((size_t)-1)
 
 static const char *khz_xml_find(const char *hay, size_t hay_len, const char *needle)
 {
@@ -70,9 +78,6 @@ static int khz_xml_attr(const char *tag, size_t tag_len, const char *name,
 			continue;
 		}
 
-		/* Must be a whole attribute name: preceded by whitespace and
-		   followed by ={quote}. Without the left-hand check, "t" would match
-		   inside "count". */
 		if (at == 0 || (tag[at - 1] != ' ' && tag[at - 1] != '\t')) {
 			continue;
 		}
@@ -97,10 +102,6 @@ static int khz_xml_attr(const char *tag, size_t tag_len, const char *name,
 	return 0;
 }
 
-/* Expands the five predefined entities into an arena buffer. Numeric character
-   references are not expanded: they are left as written and counted by the
-   caller as text, because silently mangling them would be worse than passing
-   them through visibly. */
 static KhzSheetStatus khz_xml_decode(KhzArena *arena, const char *src, size_t len,
                                      char **out, size_t *out_len)
 {
@@ -117,7 +118,6 @@ static KhzSheetStatus khz_xml_decode(KhzArena *arena, const char *src, size_t le
 	}
 
 	buffer = (char *)khz_arena_alloc_zeroed(arena, len + 1u);
-
 	if (buffer == NULL) {
 		return KHZ_SHEET_ERR_MEMORY;
 	}
@@ -127,33 +127,19 @@ static KhzSheetStatus khz_xml_decode(KhzArena *arena, const char *src, size_t le
 
 		if (src[read_at] == '&') {
 			if (left >= 5u && memcmp(src + read_at, "&amp;", 5u) == 0) {
-				buffer[write_at++] = '&';
-				read_at += 5u;
-				continue;
+				buffer[write_at++] = '&'; read_at += 5u; continue;
 			}
-
 			if (left >= 4u && memcmp(src + read_at, "&lt;", 4u) == 0) {
-				buffer[write_at++] = '<';
-				read_at += 4u;
-				continue;
+				buffer[write_at++] = '<'; read_at += 4u; continue;
 			}
-
 			if (left >= 4u && memcmp(src + read_at, "&gt;", 4u) == 0) {
-				buffer[write_at++] = '>';
-				read_at += 4u;
-				continue;
+				buffer[write_at++] = '>'; read_at += 4u; continue;
 			}
-
 			if (left >= 6u && memcmp(src + read_at, "&quot;", 6u) == 0) {
-				buffer[write_at++] = '"';
-				read_at += 6u;
-				continue;
+				buffer[write_at++] = '"'; read_at += 6u; continue;
 			}
-
 			if (left >= 6u && memcmp(src + read_at, "&apos;", 6u) == 0) {
-				buffer[write_at++] = '\'';
-				read_at += 6u;
-				continue;
+				buffer[write_at++] = '\''; read_at += 6u; continue;
 			}
 		}
 
@@ -163,7 +149,6 @@ static KhzSheetStatus khz_xml_decode(KhzArena *arena, const char *src, size_t le
 	buffer[write_at] = '\0';
 	*out = buffer;
 	*out_len = write_at;
-
 	return KHZ_SHEET_OK;
 }
 
@@ -175,10 +160,7 @@ static KhzSheetStatus khz_xlsx_apply_exponent(KhzRational value,
 	KhzRational factor;
 	KhzSheetStatus status;
 
-	if (out == NULL) {
-		return KHZ_SHEET_ERR_NULL;
-	}
-
+	if (out == NULL) return KHZ_SHEET_ERR_NULL;
 	if (value.num == (int64_t)0 || exponent == (uint32_t)0) {
 		*out = value;
 		return KHZ_SHEET_OK;
@@ -189,9 +171,7 @@ static KhzSheetStatus khz_xlsx_apply_exponent(KhzRational value,
 
 	while (exponent != (uint32_t)0) {
 		status = khz_rational_mul(value, factor, &value);
-		if (status != KHZ_SHEET_OK) {
-			return status;
-		}
+		if (status != KHZ_SHEET_OK) return status;
 		exponent -= (uint32_t)1;
 	}
 
@@ -199,10 +179,6 @@ static KhzSheetStatus khz_xlsx_apply_exponent(KhzRational value,
 	return KHZ_SHEET_OK;
 }
 
-/* Decimal/exponent text to an exact rational. "3.25" becomes 13/4 and
-   "1e-8" becomes 1/100000000. No floating conversion is involved. If the
-   exact expanded value cannot fit the rational contract, overflow is returned
-   rather than rounding to a nearby value. */
 static KhzSheetStatus khz_xlsx_parse_number(const char *text, size_t len, KhzRational *out)
 {
 	int64_t mantissa = 0;
@@ -219,83 +195,50 @@ static KhzSheetStatus khz_xlsx_parse_number(const char *text, size_t len, KhzRat
 	int exponent_digit = 0;
 	int exponent_too_large = 0;
 
-	if (text == NULL || out == NULL) {
-		return KHZ_SHEET_ERR_NULL;
-	}
+	if (text == NULL || out == NULL) return KHZ_SHEET_ERR_NULL;
+	if (len == 0) return KHZ_SHEET_ERR_FORMAT;
 
-	if (len == 0) {
-		return KHZ_SHEET_ERR_FORMAT;
-	}
-
-	if (text[at] == '-') {
-		negative = 1;
-		at += 1u;
-	} else if (text[at] == '+') {
-		at += 1u;
-	}
+	if (text[at] == '-') { negative = 1; at += 1u; }
+	else if (text[at] == '+') { at += 1u; }
 
 	for (; at < len; ++at) {
 		char ch = text[at];
-
 		if (ch == 'e' || ch == 'E') {
 			seen_exponent = 1;
 			at += 1u;
 			break;
 		}
-
 		if (ch == '.') {
-			if (seen_point != 0) {
-				return KHZ_SHEET_ERR_FORMAT;
-			}
+			if (seen_point != 0) return KHZ_SHEET_ERR_FORMAT;
 			seen_point = 1;
 			continue;
 		}
-
-		if (ch < '0' || ch > '9') {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
-
-		if (mantissa > (INT64_MAX - 9) / 10) {
-			return KHZ_SHEET_ERR_OVERFLOW;
-		}
-
+		if (ch < '0' || ch > '9') return KHZ_SHEET_ERR_FORMAT;
+		if (mantissa > (INT64_MAX - 9) / 10) return KHZ_SHEET_ERR_OVERFLOW;
 		mantissa = mantissa * 10 + (int64_t)(ch - '0');
 		seen_digit = 1;
-
 		if (seen_point != 0) {
-			if (scale > KHZ_XLSX_MAX_SCALE / 10) {
-				return KHZ_SHEET_ERR_OVERFLOW;
-			}
+			if (scale > KHZ_XLSX_MAX_SCALE / 10) return KHZ_SHEET_ERR_OVERFLOW;
 			scale *= 10;
 		}
 	}
 
-	if (seen_digit == 0) {
-		return KHZ_SHEET_ERR_FORMAT;
-	}
+	if (seen_digit == 0) return KHZ_SHEET_ERR_FORMAT;
 
 	if (seen_exponent != 0) {
-		if (at >= len) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
+		if (at >= len) return KHZ_SHEET_ERR_FORMAT;
 		if (text[at] == '-' || text[at] == '+') {
 			exponent_negative = text[at] == '-' ? 1 : 0;
 			at += 1u;
 		}
-		if (at >= len) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
+		if (at >= len) return KHZ_SHEET_ERR_FORMAT;
 
 		for (; at < len; ++at) {
 			char ch = text[at];
 			uint32_t digit;
-
-			if (ch < '0' || ch > '9') {
-				return KHZ_SHEET_ERR_FORMAT;
-			}
+			if (ch < '0' || ch > '9') return KHZ_SHEET_ERR_FORMAT;
 			exponent_digit = 1;
 			digit = (uint32_t)(ch - '0');
-
 			if (exponent_too_large == 0) {
 				if (exponent > (KHZ_XLSX_MAX_EXPONENT_STEPS - digit) / (uint32_t)10) {
 					exponent_too_large = 1;
@@ -304,32 +247,14 @@ static KhzSheetStatus khz_xlsx_parse_number(const char *text, size_t len, KhzRat
 				}
 			}
 		}
-
-		if (exponent_digit == 0) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
+		if (exponent_digit == 0) return KHZ_SHEET_ERR_FORMAT;
 	}
 
-	if (negative != 0) {
-		mantissa = -mantissa;
-	}
-
+	if (negative != 0) mantissa = -mantissa;
 	status = khz_rational_make(mantissa, scale, &value);
-	if (status != KHZ_SHEET_OK) {
-		return status;
-	}
-
-	/* Zero is unchanged by any finite decimal exponent. We still parsed every
-	   exponent character above so malformed zero literals are not accepted. */
-	if (value.num == (int64_t)0) {
-		*out = value;
-		return KHZ_SHEET_OK;
-	}
-
-	if (exponent_too_large != 0) {
-		return KHZ_SHEET_ERR_OVERFLOW;
-	}
-
+	if (status != KHZ_SHEET_OK) return status;
+	if (value.num == (int64_t)0) { *out = value; return KHZ_SHEET_OK; }
+	if (exponent_too_large != 0) return KHZ_SHEET_ERR_OVERFLOW;
 	return khz_xlsx_apply_exponent(value, exponent_negative, exponent, out);
 }
 
@@ -338,38 +263,19 @@ KhzSheetStatus khz_xlsx_reader_check_package(KhzXlsxReader *reader)
 	const KhzXlsxEntry *entry;
 	KhzSheetStatus status;
 
-	if (reader == NULL) {
-		return KHZ_SHEET_ERR_NULL;
-	}
-
-	if (reader->loaded == 0) {
-		return KHZ_SHEET_ERR_STATE;
-	}
+	if (reader == NULL) return KHZ_SHEET_ERR_NULL;
+	if (reader->loaded == 0) return KHZ_SHEET_ERR_STATE;
 
 	status = khz_xlsx_reader_find(reader, "[Content_Types].xml", &entry);
-
-	if (status != KHZ_SHEET_OK) {
-		return status;
-	}
-
+	if (status != KHZ_SHEET_OK) return status;
 	status = khz_xlsx_reader_find(reader, "_rels/.rels", &entry);
-
-	if (status != KHZ_SHEET_OK) {
-		return status;
-	}
-
+	if (status != KHZ_SHEET_OK) return status;
 	status = khz_xlsx_reader_find(reader, "xl/workbook.xml", &entry);
+	if (status != KHZ_SHEET_OK) return status;
 
-	if (status != KHZ_SHEET_OK) {
-		return status;
-	}
-
-	/* A workbook with no <sheet> element has no worksheet to load, which is a
-	   format error rather than an empty success. */
 	if (khz_xml_find((const char *)entry->data, entry->size, "<sheet ") == NULL) {
 		return KHZ_SHEET_ERR_FORMAT;
 	}
-
 	return KHZ_SHEET_OK;
 }
 
@@ -384,41 +290,23 @@ KhzSheetStatus khz_xlsx_reader_shared_strings(KhzXlsxReader *reader)
 	size_t index = 0;
 	KhzSheetStatus status;
 
-	if (reader == NULL) {
-		return KHZ_SHEET_ERR_NULL;
-	}
-
-	if (reader->loaded == 0) {
-		return KHZ_SHEET_ERR_STATE;
-	}
+	if (reader == NULL) return KHZ_SHEET_ERR_NULL;
+	if (reader->loaded == 0) return KHZ_SHEET_ERR_STATE;
 
 	status = khz_xlsx_reader_find(reader, "xl/sharedStrings.xml", &entry);
-
-	/* Absent is legitimate: a workbook of pure numbers has no such part. */
 	if (status == KHZ_SHEET_ERR_MISSING) {
 		reader->strings = NULL;
 		reader->string_count = 0;
 		return KHZ_SHEET_OK;
 	}
-
-	if (status != KHZ_SHEET_OK) {
-		return status;
-	}
+	if (status != KHZ_SHEET_OK) return status;
 
 	part = (const char *)entry->data;
 	limit = part + entry->size;
-
-	/* Counted first, then filled. Two passes over a part already in memory is
-	   cheaper than growing an array in a bump allocator that cannot free. */
 	cursor = part;
-
 	while (cursor < limit) {
 		const char *found = khz_xml_find(cursor, (size_t)(limit - cursor), "<si>");
-
-		if (found == NULL) {
-			break;
-		}
-
+		if (found == NULL) break;
 		counted += 1u;
 		cursor = found + 4;
 	}
@@ -428,20 +316,13 @@ KhzSheetStatus khz_xlsx_reader_shared_strings(KhzXlsxReader *reader)
 		reader->string_count = 0;
 		return KHZ_SHEET_OK;
 	}
-
-	if (counted > KHZ_XLSX_READER_MAX_STRINGS) {
-		return KHZ_SHEET_ERR_LIMIT;
-	}
+	if (counted > KHZ_XLSX_READER_MAX_STRINGS) return KHZ_SHEET_ERR_LIMIT;
 
 	table = (const char **)khz_arena_alloc_zeroed(reader->arena,
 	                                              counted * sizeof(const char *));
-
-	if (table == NULL) {
-		return KHZ_SHEET_ERR_MEMORY;
-	}
+	if (table == NULL) return KHZ_SHEET_ERR_MEMORY;
 
 	cursor = part;
-
 	while (index < counted && cursor < limit) {
 		const char *item = khz_xml_find(cursor, (size_t)(limit - cursor), "<si>");
 		const char *item_end;
@@ -450,49 +331,24 @@ KhzSheetStatus khz_xlsx_reader_shared_strings(KhzXlsxReader *reader)
 		char *decoded;
 		size_t decoded_len;
 
-		if (item == NULL) {
-			break;
-		}
-
+		if (item == NULL) break;
 		item_end = khz_xml_find(item, (size_t)(limit - item), "</si>");
-
-		if (item_end == NULL) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
-
-		/* Only the first <t> run of each <si> is taken. A shared string split
-		   into several formatted runs therefore loads as its first run, which
-		   is a real limitation and is what cells_unsupported cannot express
-		   because the cell does load - just not with all of its text. */
+		if (item_end == NULL) return KHZ_SHEET_ERR_FORMAT;
 		open = khz_xml_find(item, (size_t)(item_end - item), "<t");
-
 		if (open == NULL) {
 			table[index] = "";
 			index += 1u;
 			cursor = item_end + 5;
 			continue;
 		}
-
 		open = khz_xml_find(open, (size_t)(item_end - open), ">");
-
-		if (open == NULL) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
-
+		if (open == NULL) return KHZ_SHEET_ERR_FORMAT;
 		open += 1;
 		close = khz_xml_find(open, (size_t)(item_end - open), "</t>");
-
-		if (close == NULL) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
-
+		if (close == NULL) return KHZ_SHEET_ERR_FORMAT;
 		status = khz_xml_decode(reader->arena, open, (size_t)(close - open),
 		                        &decoded, &decoded_len);
-
-		if (status != KHZ_SHEET_OK) {
-			return status;
-		}
-
+		if (status != KHZ_SHEET_OK) return status;
 		table[index] = decoded;
 		index += 1u;
 		cursor = item_end + 5;
@@ -501,7 +357,6 @@ KhzSheetStatus khz_xlsx_reader_shared_strings(KhzXlsxReader *reader)
 	reader->strings = table;
 	reader->string_count = index;
 	reader->report.shared_strings = (uint64_t)index;
-
 	return KHZ_SHEET_OK;
 }
 
@@ -513,18 +368,18 @@ KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *shee
 	const char *limit;
 	KhzSheetStatus status;
 
-	if (reader == NULL || sheet == NULL || part_name == NULL) {
-		return KHZ_SHEET_ERR_NULL;
-	}
-
-	if (reader->loaded == 0) {
-		return KHZ_SHEET_ERR_STATE;
-	}
+	if (reader == NULL || sheet == NULL || part_name == NULL) return KHZ_SHEET_ERR_NULL;
+	if (reader->loaded == 0) return KHZ_SHEET_ERR_STATE;
 
 	status = khz_xlsx_reader_find(reader, part_name, &entry);
+	if (status != KHZ_SHEET_OK) return status;
 
-	if (status != KHZ_SHEET_OK) {
-		return status;
+	/* If parser and destination share one arena, every cell payload written
+	   below is younger than the reader's load mark. Rewinding to that mark
+	   would invalidate live sheet pointers. Poison only the release mark; the
+	   loaded reader remains usable for report/find operations. */
+	if (reader->arena == khz_sheet_arena(sheet)) {
+		reader->mark = KHZ_XLSX_SHARED_ARENA_MARK;
 	}
 
 	cursor = (const char *)entry->data;
@@ -546,181 +401,93 @@ KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *shee
 		uint32_t row = 0;
 		int self_closing;
 
-		if (open == NULL) {
-			break;
-		}
-
+		if (open == NULL) break;
 		tag_end = khz_xml_find(open, (size_t)(limit - open), ">");
-
-		if (tag_end == NULL) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
-
+		if (tag_end == NULL) return KHZ_SHEET_ERR_FORMAT;
 		tag_len = (size_t)(tag_end - open);
 		self_closing = (tag_len > 0 && *(tag_end - 1) == '/') ? 1 : 0;
-
 		reader->report.cells_seen += 1u;
 
-		if (khz_xml_attr(open, tag_len, "r", &ref, &ref_len) == 0) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
-
+		if (khz_xml_attr(open, tag_len, "r", &ref, &ref_len) == 0) return KHZ_SHEET_ERR_FORMAT;
 		status = khz_xlsx_reader_parse_ref(ref, ref_len, &col, &row);
-
-		if (status != KHZ_SHEET_OK) {
-			return status;
-		}
-
-		/* <c r="A1"/> is a styled but empty cell. Nothing is written: an
-		   empty cell is the grid's default, and committing one would put a
-		   link on the proof chain for a cell that holds nothing. */
-		if (self_closing != 0) {
-			cursor = tag_end + 1;
-			continue;
-		}
+		if (status != KHZ_SHEET_OK) return status;
+		if (self_closing != 0) { cursor = tag_end + 1; continue; }
 
 		body_end = khz_xml_find(tag_end, (size_t)(limit - tag_end), "</c>");
-
-		if (body_end == NULL) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
-
+		if (body_end == NULL) return KHZ_SHEET_ERR_FORMAT;
 		if (khz_xml_attr(open, tag_len, "t", &type, &type_len) == 0) {
-			type = NULL;
-			type_len = 0;
+			type = NULL; type_len = 0;
 		}
 
 		formula_open = khz_xml_find(tag_end, (size_t)(body_end - tag_end), "<f>");
-
-		/* A formula cell is loaded as its formula, and the cached <v> Excel
-		   wrote beside it is discarded rather than trusted. The formula is
-		   the authority; a cached result this engine did not compute has no
-		   place on the proof chain. It will be recalculated. */
 		if (formula_open != NULL) {
-			const char *formula_close =
-				khz_xml_find(formula_open, (size_t)(body_end - formula_open), "</f>");
+			const char *formula_close = khz_xml_find(formula_open,
+				(size_t)(body_end - formula_open), "</f>");
 			char *decoded;
 			size_t decoded_len;
-
 			reader->report.formulas_seen += 1u;
-
-			if (formula_close == NULL) {
-				return KHZ_SHEET_ERR_FORMAT;
-			}
-
+			if (formula_close == NULL) return KHZ_SHEET_ERR_FORMAT;
 			status = khz_xml_decode(reader->arena, formula_open + 3,
-			                        (size_t)(formula_close - (formula_open + 3)),
-			                        &decoded, &decoded_len);
-
-			if (status != KHZ_SHEET_OK) {
-				return status;
-			}
-
+				(size_t)(formula_close - (formula_open + 3)), &decoded, &decoded_len);
+			if (status != KHZ_SHEET_OK) return status;
 			status = khz_sheet_set_formula(sheet, col, row, decoded, decoded_len);
-
-			if (status != KHZ_SHEET_OK) {
-				return status;
-			}
-
+			if (status != KHZ_SHEET_OK) return status;
 			reader->report.cells_loaded += 1u;
 			cursor = body_end + 4;
 			continue;
 		}
 
 		value_open = khz_xml_find(tag_end, (size_t)(body_end - tag_end), "<v>");
-
 		if (value_open == NULL) {
 			reader->report.cells_unsupported += 1u;
 			cursor = body_end + 4;
 			continue;
 		}
-
 		value_open += 3;
 		value_close = khz_xml_find(value_open, (size_t)(body_end - value_open), "</v>");
-
-		if (value_close == NULL) {
-			return KHZ_SHEET_ERR_FORMAT;
-		}
+		if (value_close == NULL) return KHZ_SHEET_ERR_FORMAT;
 
 		if (type != NULL && type_len == 1u && type[0] == 's') {
-			/* Shared string: <v> holds an index into sharedStrings.xml. */
 			KhzRational slot;
 			int64_t which;
-
-			status = khz_xlsx_parse_number(value_open,
-			                               (size_t)(value_close - value_open), &slot);
-
-			if (status != KHZ_SHEET_OK) {
-				return status;
-			}
-
+			status = khz_xlsx_parse_number(value_open, (size_t)(value_close - value_open), &slot);
+			if (status != KHZ_SHEET_OK) return status;
 			status = khz_rational_to_i64(slot, &which);
-
-			if (status != KHZ_SHEET_OK) {
-				return KHZ_SHEET_ERR_FORMAT;
-			}
-
-			/* Without the table, or with an index outside it, the cell is
-			   counted as unsupported. It is not given a placeholder: a wrong
-			   string is worse than a missing one. */
-			if (which < 0 || reader->strings == NULL
-			    || (size_t)which >= reader->string_count) {
+			if (status != KHZ_SHEET_OK) return KHZ_SHEET_ERR_FORMAT;
+			if (which < 0 || reader->strings == NULL || (size_t)which >= reader->string_count) {
 				reader->report.cells_unsupported += 1u;
 				cursor = body_end + 4;
 				continue;
 			}
-
 			status = khz_sheet_set_text(sheet, col, row,
-			                            reader->strings[(size_t)which],
-			                            strlen(reader->strings[(size_t)which]));
+				reader->strings[(size_t)which], strlen(reader->strings[(size_t)which]));
 		} else if (type != NULL && type_len == 3u && memcmp(type, "str", 3u) == 0) {
 			char *decoded;
 			size_t decoded_len;
-
 			status = khz_xml_decode(reader->arena, value_open,
-			                        (size_t)(value_close - value_open),
-			                        &decoded, &decoded_len);
-
-			if (status != KHZ_SHEET_OK) {
-				return status;
-			}
-
+				(size_t)(value_close - value_open), &decoded, &decoded_len);
+			if (status != KHZ_SHEET_OK) return status;
 			status = khz_sheet_set_text(sheet, col, row, decoded, decoded_len);
 		} else if (type != NULL && type_len == 1u && type[0] == 'b') {
 			int flag = (value_close > value_open && *value_open == '1') ? 1 : 0;
-
 			status = khz_sheet_set_bool(sheet, col, row, flag);
 		} else if (type != NULL && type_len == 1u && type[0] == 'e') {
-			/* An error cell is a cached result of a computation this engine did
-			   not perform. Counted, not loaded. */
 			reader->report.cells_unsupported += 1u;
 			cursor = body_end + 4;
 			continue;
-		} else if (type != NULL && type_len == 9u
-		           && memcmp(type, "inlineStr", 9u) == 0) {
-			/* Inline strings live in <is><t>, not <v>. Reaching here means the
-			   part declared one and wrote a <v> anyway. Refused. */
+		} else if (type != NULL && type_len == 9u && memcmp(type, "inlineStr", 9u) == 0) {
 			reader->report.cells_unsupported += 1u;
 			cursor = body_end + 4;
 			continue;
 		} else {
-			/* No t attribute, or t="n": a number. */
 			KhzRational value;
-
 			status = khz_xlsx_parse_number(value_open,
-			                               (size_t)(value_close - value_open), &value);
-
-			if (status != KHZ_SHEET_OK) {
-				return status;
-			}
-
+				(size_t)(value_close - value_open), &value);
+			if (status != KHZ_SHEET_OK) return status;
 			status = khz_sheet_set_rational(sheet, col, row, value);
 		}
 
-		if (status != KHZ_SHEET_OK) {
-			return status;
-		}
-
+		if (status != KHZ_SHEET_OK) return status;
 		reader->report.cells_loaded += 1u;
 		cursor = body_end + 4;
 	}
@@ -733,33 +500,12 @@ KhzSheetStatus khz_xlsx_reader_read(KhzXlsxReader *reader, KhzSheet *sheet,
 {
 	KhzSheetStatus status;
 
-	if (reader == NULL || sheet == NULL || bytes == NULL) {
-		return KHZ_SHEET_ERR_NULL;
-	}
-
+	if (reader == NULL || sheet == NULL || bytes == NULL) return KHZ_SHEET_ERR_NULL;
 	status = khz_xlsx_reader_load(reader, bytes, size);
-
-	if (status != KHZ_SHEET_OK) {
-		return status;
-	}
-
+	if (status != KHZ_SHEET_OK) return status;
 	status = khz_xlsx_reader_check_package(reader);
-
-	if (status != KHZ_SHEET_OK) {
-		return status;
-	}
-
+	if (status != KHZ_SHEET_OK) return status;
 	status = khz_xlsx_reader_shared_strings(reader);
-
-	if (status != KHZ_SHEET_OK) {
-		return status;
-	}
-
-	/* The worksheet path is taken by convention, not by resolving the
-	   workbook's relationship part. Correct for everything this project
-	   writes and for the common single-sheet case; a workbook that names its
-	   worksheet anything else must be parsed with khz_xlsx_reader_parse_sheet
-	   and an explicit part name. Walking xl/_rels/workbook.xml.rels to map
-	   r:id to a target is the honest fix and is not done here. */
+	if (status != KHZ_SHEET_OK) return status;
 	return khz_xlsx_reader_parse_sheet(reader, sheet, "xl/worksheets/sheet1.xml");
 }
