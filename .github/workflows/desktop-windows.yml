@@ -1,6 +1,14 @@
 name: Desktop Windows
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "src/KHZ.Sheet.Core/**"
+      - "src/KHZ.Sheet.Desktop/**"
+      - "CMakeLists.txt"
+      - "build-desktop.ps1"
+      - ".github/workflows/desktop-windows.yml"
   pull_request:
     paths:
       - "src/KHZ.Sheet.Core/**"
