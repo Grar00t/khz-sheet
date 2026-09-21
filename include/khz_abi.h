@@ -21,20 +21,20 @@ extern "C" {
    KhzCommitLog member, which moved proof, commits and initialised and changed
    sizeof(KhzSheet).
 
-   Phase 96 is the same kind of event and is now 95. KhzDepGraph gained three
-   members - the declared-region list head, the region count and the count of
-   concrete edges materialised from regions - so sizeof(KhzDepGraph) changed.
-   KhzDepGraph sits inside KhzSheet ahead of the commit log and the proof, so
-   this also moved every KhzSheet member after it. Any caller that hardcoded
-   those offsets instead of asking khz_abi_*_offset() is now wrong, which is
-   precisely what this constant is for.
+   Phase 96 bumped it to 95. KhzDepGraph gained three members - the declared-
+   region list head, the region count and the count of concrete edges
+   materialised from regions - so sizeof(KhzDepGraph) changed and moved later
+   KhzSheet members.
 
-   KhzAbiSizes itself remains unchanged in layout. dep_graph_bytes is an
-   existing field and simply reports a larger number now; the new range-edge
-   query below is a free function, not a new struct member, so a managed
-   mirror compiled against 91 still reads the right fields at the right
-   offsets and only has to widen the version it accepts. */
-#define KHZ_ABI_VERSION ((uint32_t)95)
+   ABI 96 extends the public KhzCommitEntry with the predecessor proof head.
+   That retained predecessor is required to authenticate superseded commit-log
+   transitions instead of trusting a historical post-commit head on its own.
+   KhzSheet itself does not grow because KhzCommitLog stores an entry pointer,
+   but C callers indexing KhzCommitEntry arrays need the new stride, so this is
+   still an ABI layout change and must be versioned.
+
+   KhzAbiSizes itself remains unchanged in layout. */
+#define KHZ_ABI_VERSION ((uint32_t)96)
 
 typedef struct KhzAbiSizes {
     uint32_t version;
