@@ -27,12 +27,13 @@ extern "C" {
 /* One commit event.
 
    key and revision identify which cell was written and which of its writes
-   this was. head is the chain head immediately after the commit, so a walk of
-   consecutive entries reproduces the link sequence without needing the cell
-   payloads. */
+   this was. prev and head are the chain heads immediately before and after
+   the commit. Keeping both makes every retained transition independently
+   checkable even after the historical cell payload has been superseded. */
 typedef struct KhzCommitEntry {
     uint64_t      key;      /* khz_cell_key(col, row) */
     uint64_t      revision; /* cell revision at this commit */
+    unsigned char prev[KHZ_SHA256_DIGEST_BYTES];
     unsigned char head[KHZ_SHA256_DIGEST_BYTES];
 } KhzCommitEntry;
 
@@ -153,9 +154,10 @@ KhzSheetStatus khz_sheet_avg(KhzSheet *sheet,
 
    cells_verified counts entries whose cell still holds the payload that was
    committed, recomputed and matched. superseded counts entries whose cell has
-   since been written again: the historical payload no longer exists anywhere,
-   so the digest cannot be recomputed and the entry's recorded head is taken as
-   the link. dropped counts commits that fell out of the ring window entirely.
+   since been written again: the historical payload no longer exists, so that
+   payload digest cannot be recomputed, but prev/head continuity is still
+   authenticated against the neighboring retained events. dropped counts
+   commits that fell out of the ring window entirely.
 
    A KHZ_SHEET_OK audit with superseded or dropped above zero is a weaker claim
    than one with both at zero, and these fields exist so the difference is
@@ -168,8 +170,8 @@ typedef struct KhzChainAudit {
     size_t   failed_entry; /* walk position of the first failure */
 } KhzChainAudit;
 
-/* Replays the commit log and checks that the retained link sequence ends at
-   the current chain head.
+/* Replays the commit log and checks every retained prev->head transition and
+   that the retained sequence ends at the current chain head.
 
    This replaced an insertion-order replay of the cell array, which was only
    correct while every cell had been written exactly once and which therefore
