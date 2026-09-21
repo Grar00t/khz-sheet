@@ -141,12 +141,6 @@ KhzSheetStatus khz_formula_range(KhzFormula *formula,
     return KHZ_SHEET_OK;
 }
 
-static int khz_op_is_aggregate(KhzFormulaOp op)
-{
-    return op == KHZ_FORMULA_SUM || op == KHZ_FORMULA_AVG
-        || op == KHZ_FORMULA_MIN || op == KHZ_FORMULA_MAX;
-}
-
 KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
                                 KhzFormulaNode *const *children,
                                 size_t child_count, KhzFormulaNode **out)
@@ -163,14 +157,13 @@ KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
         return KHZ_SHEET_ERR_NULL;
     }
 
-    /* Arity is enforced here rather than at evaluation. A DIV with three
-       children would otherwise evaluate as if the third did not exist, which
-       is a wrong answer instead of a refusal. */
+    /* Arity is enforced here rather than at evaluation. */
     switch (op) {
     case KHZ_FORMULA_ADD:
     case KHZ_FORMULA_SUB:
     case KHZ_FORMULA_MUL:
     case KHZ_FORMULA_DIV:
+    case KHZ_FORMULA_POW:
         if (child_count != (size_t)2) {
             return KHZ_SHEET_ERR_FORMAT;
         }
@@ -246,6 +239,7 @@ const char *khz_formula_op_name(KhzFormulaOp op)
     case KHZ_FORMULA_AVG:   return "AVG";
     case KHZ_FORMULA_MIN:   return "MIN";
     case KHZ_FORMULA_MAX:   return "MAX";
+    case KHZ_FORMULA_POW:   return "POW";
     default:                return "UNKNOWN";
     }
 }
@@ -320,7 +314,6 @@ KhzSheetStatus khz_formula_parse_ref(const char *text, size_t len,
         return KHZ_SHEET_ERR_FORMAT;
     }
 
-    /* A1 is the user's origin; the grid's is 0,0. */
     *col = (uint32_t)(column - (uint64_t)1);
     *row = (uint32_t)(line - (uint64_t)1);
 
@@ -379,9 +372,6 @@ static char khz_peek(KhzParser *p)
     return p->pos < p->len ? p->src[p->pos] : '\0';
 }
 
-/* Multiply-accumulate with an explicit ceiling. A literal that does not fit is
-   refused at the lexer; wrapping it would put a number in the sheet that the
-   user never typed. */
 static int khz_mul10_add(int64_t *acc, int digit)
 {
     if (*acc > (INT64_MAX - (int64_t)digit) / (int64_t)10) {
@@ -432,9 +422,6 @@ static KhzSheetStatus khz_parse_number(KhzParser *p, KhzFormulaNode **out)
         return KHZ_SHEET_ERR_FORMAT;
     }
 
-    /* 0.1 becomes 1/10 exactly. This is the single most important line in the
-       parser: a literal that arrives as a double has already lost the
-       precision the rest of the engine exists to preserve. */
     status = khz_rational_make(num, den, &value);
     if (status != KHZ_SHEET_OK) {
         return status;
@@ -492,9 +479,6 @@ static KhzSheetStatus khz_function_op(const char *text, size_t len, KhzFormulaOp
     } else if (khz_word_matches(text, len, "MAX")) {
         *op = KHZ_FORMULA_MAX;
     } else {
-        /* An unknown name is #NAME? in a spreadsheet, but at parse time there
-           is no cell to put it in, so it is a format error here and the caller
-           decides. */
         return KHZ_SHEET_ERR_MISSING;
     }
 
@@ -667,10 +651,49 @@ static KhzSheetStatus khz_parse_unary(KhzParser *p, KhzFormulaNode **out)
     return khz_parse_primary(p, out);
 }
 
-static KhzSheetStatus khz_parse_term(KhzParser *p, KhzFormulaNode **out)
+/* Power binds above multiplication and, like the managed parser, is left
+   associative. Unary signs are parsed before power so -2^2 is (-2)^2. */
+static KhzSheetStatus khz_parse_power(KhzParser *p, KhzFormulaNode **out)
 {
     KhzFormulaNode *left = NULL;
     KhzSheetStatus status = khz_parse_unary(p, &left);
+
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
+
+    for (;;) {
+        KhzFormulaNode *pair[2];
+        KhzFormulaNode *right = NULL;
+
+        khz_skip_space(p);
+        if (khz_peek(p) != '^') {
+            break;
+        }
+        ++p->pos;
+
+        status = khz_parse_unary(p, &right);
+        if (status != KHZ_SHEET_OK) {
+            return status;
+        }
+
+        pair[0] = left;
+        pair[1] = right;
+        status = khz_formula_node(p->formula, KHZ_FORMULA_POW,
+                                  pair, (size_t)2, &left);
+        if (status != KHZ_SHEET_OK) {
+            return status;
+        }
+    }
+
+    *out = left;
+    return KHZ_SHEET_OK;
+}
+
+static KhzSheetStatus khz_parse_term(KhzParser *p, KhzFormulaNode **out)
+{
+    KhzFormulaNode *left = NULL;
+    KhzSheetStatus status = khz_parse_power(p, &left);
 
     if (status != KHZ_SHEET_OK) {
         return status;
@@ -695,7 +718,7 @@ static KhzSheetStatus khz_parse_term(KhzParser *p, KhzFormulaNode **out)
 
         ++p->pos;
 
-        status = khz_parse_unary(p, &right);
+        status = khz_parse_power(p, &right);
         if (status != KHZ_SHEET_OK) {
             return status;
         }
@@ -802,8 +825,6 @@ KhzSheetStatus khz_formula_parse(KhzFormula *formula, KhzArena *arena,
     parser.formula = formula;
     parser.error = error;
 
-    /* The leading '=' is how a user marks a formula, not part of the
-       expression. */
     khz_skip_space(&parser);
     if (khz_peek(&parser) == '=') {
         ++parser.pos;
@@ -817,8 +838,6 @@ KhzSheetStatus khz_formula_parse(KhzFormula *formula, KhzArena *arena,
 
     khz_skip_space(&parser);
 
-    /* Trailing junk is a failure. Accepting "A1 B2" by ignoring the tail would
-       evaluate half of what was written. */
     if (parser.pos != parser.len) {
         khz_parse_fail(&parser, "end of formula");
         khz_formula_abandon(formula);
