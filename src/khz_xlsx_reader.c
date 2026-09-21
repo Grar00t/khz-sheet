@@ -237,6 +237,7 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 	size_t eocd;
 	size_t cd_offset;
 	size_t cd_size;
+	size_t cd_end;
 	size_t total;
 	size_t cursor;
 	size_t index;
@@ -279,6 +280,10 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 	if (cd_offset > size || cd_size > size - cd_offset) {
 		return KHZ_SHEET_ERR_FORMAT;
 	}
+	cd_end = cd_offset + cd_size;
+	if (cd_end > eocd) {
+		return KHZ_SHEET_ERR_FORMAT;
+	}
 
 	/* One mark for the whole load. Either every entry record, name and
 	   inflated payload is allocated, or the arena is returned to exactly
@@ -303,12 +308,13 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 		size_t declared_size;
 		size_t packed_size;
 		size_t data_offset;
+		size_t record_end;
 		uint16_t method;
 		uint32_t declared_crc;
 		const unsigned char *payload;
 		char *name;
 
-		if (cursor > size || size - cursor < KHZ_ZIP_CENTRAL_FIXED) {
+		if (cursor > cd_end || cd_end - cursor < KHZ_ZIP_CENTRAL_FIXED) {
 			(void)khz_arena_release(reader->arena, mark);
 			return KHZ_SHEET_ERR_FORMAT;
 		}
@@ -334,10 +340,22 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 			return KHZ_SHEET_ERR_LIMIT;
 		}
 
-		if (size - cursor - KHZ_ZIP_CENTRAL_FIXED < name_len) {
+		record_end = cursor + KHZ_ZIP_CENTRAL_FIXED;
+		if (name_len > cd_end - record_end) {
 			(void)khz_arena_release(reader->arena, mark);
 			return KHZ_SHEET_ERR_FORMAT;
 		}
+		record_end += name_len;
+		if (extra_len > cd_end - record_end) {
+			(void)khz_arena_release(reader->arena, mark);
+			return KHZ_SHEET_ERR_FORMAT;
+		}
+		record_end += extra_len;
+		if (comment_len > cd_end - record_end) {
+			(void)khz_arena_release(reader->arena, mark);
+			return KHZ_SHEET_ERR_FORMAT;
+		}
+		record_end += comment_len;
 
 		/* Stored and DEFLATE only. Every other method in the appnote -
 		   bzip2, LZMA, zstd, the obsolete shrink and implode - is refused
@@ -439,7 +457,12 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 			return KHZ_SHEET_ERR_FORMAT;
 		}
 
-		cursor += KHZ_ZIP_CENTRAL_FIXED + name_len + extra_len + comment_len;
+		cursor = record_end;
+	}
+
+	if (cursor != cd_end) {
+		(void)khz_arena_release(reader->arena, mark);
+		return KHZ_SHEET_ERR_FORMAT;
 	}
 
 	reader->bytes = raw;
