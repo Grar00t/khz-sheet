@@ -209,9 +209,6 @@ static KhzSheetStatus khz_ledger_load_state(KhzLedger *ledger)
         int len = sqlite3_column_bytes(stmt, 0);
 
         if (blob == NULL || len != (int)KHZ_SHA256_DIGEST_BYTES) {
-            /* A row exists but its hash is not a SHA-256 digest. The file is
-               not a ledger this build can extend, and guessing a head would
-               corrupt the chain. */
             sqlite3_finalize(stmt);
             return khz_ledger_fail(ledger, SQLITE_CORRUPT, KHZ_SHEET_ERR_FORMAT);
         }
@@ -265,8 +262,6 @@ KhzSheetStatus khz_ledger_open(KhzLedger *ledger, const char *path)
     ledger->db = db;
     ledger->path = copy;
 
-    /* FULL synchronous, not NORMAL. A ledger whose last commits can vanish in
-       a power cut is not a ledger. */
     rc = sqlite3_exec(db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
     if (rc != SQLITE_OK) {
         khz_ledger_close(ledger);
@@ -298,6 +293,23 @@ KhzSheetStatus khz_ledger_open(KhzLedger *ledger, const char *path)
     if (status != KHZ_SHEET_OK) {
         khz_ledger_close(ledger);
         return status;
+    }
+
+    /* Never resume from an internally broken prefix. load_state necessarily
+       trusts the newest hash long enough to learn the candidate head; the
+       full ordered walk below is what establishes that every retained link
+       actually reaches it from genesis. Tail deletion cannot be detected by
+       a hash-only ledger without an external expected head, but a broken or
+       reordered retained prefix is rejected before any new row can extend it. */
+    if (ledger->rows != (uint64_t)0) {
+        uint64_t checked = (uint64_t)0;
+        int64_t failed_id = (int64_t)-1;
+
+        status = khz_ledger_verify_chain(ledger, &checked, &failed_id);
+        if (status != KHZ_SHEET_OK) {
+            khz_ledger_close(ledger);
+            return status;
+        }
     }
 
     ledger->last_rc = SQLITE_OK;
@@ -340,12 +352,12 @@ KhzSheetStatus khz_ledger_append_cell(KhzLedger *ledger, const KhzCell *cell)
     }
 
     if (cell->revision == (uint64_t)0) {
-        /* Never committed, so there is no proof to record. */
         return KHZ_SHEET_ERR_STATE;
     }
+    if (ledger->rows == UINT64_MAX || ledger->appended == UINT64_MAX) {
+        return KHZ_SHEET_ERR_OVERFLOW;
+    }
 
-    /* The ledger derives the link itself and compares. It records only what it
-       can reproduce, so a caller cannot insert a hash of its own choosing. */
     status = khz_cell_digest(cell, ledger->head, expected);
     if (status != KHZ_SHEET_OK) {
         return status;
@@ -386,8 +398,6 @@ KhzSheetStatus khz_ledger_append_cell(KhzLedger *ledger, const KhzCell *cell)
     sqlite3_reset(stmt);
 
     if (rc == SQLITE_CONSTRAINT) {
-        /* This exact commit is already recorded. Advancing the head would
-           double-count it. */
         return khz_ledger_fail(ledger, rc, KHZ_SHEET_ERR_STATE);
     }
 
@@ -500,9 +510,6 @@ KhzSheetStatus khz_ledger_verify_chain(KhzLedger *ledger, uint64_t *checked,
         }
 
         if (khz_hash_equal_ct(prev, link, (size_t)KHZ_SHA256_DIGEST_BYTES) == 0) {
-            /* Either a row was altered, removed, or reordered. Which one it was
-               cannot be told apart from the hashes alone, so this reports the
-               break rather than diagnosing a cause it cannot know. */
             if (failed_id != NULL) {
                 *failed_id = (int64_t)id;
             }
@@ -549,6 +556,10 @@ KhzSheetStatus khz_ledger_load_chain(KhzLedger *ledger,
     }
     if (hashes == NULL || count == NULL) {
         return KHZ_SHEET_ERR_NULL;
+    }
+
+    if (ledger->rows > (uint64_t)(SIZE_MAX / (size_t)KHZ_SHA256_DIGEST_BYTES)) {
+        return KHZ_SHEET_ERR_LIMIT;
     }
 
     capacity = (size_t)ledger->rows;
