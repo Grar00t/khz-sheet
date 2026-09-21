@@ -29,10 +29,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake python3 libsqlite3-dev
 
-      - name: Configure
+      - name: Configure portable baseline
         run: |
           cmake -S . -B build/ci \
             -DCMAKE_BUILD_TYPE=Release \
+            -DKHZ_ENABLE_AVX2=OFF \
             -DKHZ_ENABLE_LEDGER=ON \
             -DKHZ_BUILD_SELFTEST=ON \
             -DKHZ_BUILD_TESTS=ON \
@@ -73,10 +74,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake python3 libsqlite3-dev libasan8 libubsan1
 
-      - name: Configure ASAN + UBSAN
+      - name: Configure ASAN + UBSAN portable baseline
         run: |
           cmake -S . -B build/sanitize \
             -DCMAKE_BUILD_TYPE=Debug \
+            -DKHZ_ENABLE_AVX2=OFF \
             -DKHZ_ENABLE_LEDGER=ON \
             -DKHZ_BUILD_SELFTEST=ON \
             -DKHZ_BUILD_TESTS=ON \
@@ -89,3 +91,36 @@ jobs:
 
       - name: Sanitized tests
         run: ctest --test-dir build/sanitize --output-on-failure
+
+  avx2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake python3 libsqlite3-dev
+
+      - name: Configure explicit AVX2 build
+        run: |
+          cmake -S . -B build/avx2 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DKHZ_ENABLE_AVX2=ON \
+            -DKHZ_ENABLE_LEDGER=ON \
+            -DKHZ_BUILD_SELFTEST=ON \
+            -DKHZ_BUILD_TESTS=ON \
+            -DKHZ_BUILD_SHARED=OFF
+
+      - name: Build
+        run: cmake --build build/avx2 --parallel
+
+      - name: AVX2 native tests
+        run: ctest --test-dir build/avx2 --output-on-failure
+
+      - name: Confirm AVX2 kernel was compiled
+        run: |
+          output="$(./build/avx2/khz_selftest)"
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -q 'kernel=AVX2'
