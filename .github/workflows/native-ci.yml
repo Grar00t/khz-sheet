@@ -54,6 +54,11 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci
         run: dotnet run --project tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release
 
+      - name: Managed dependency-rewrite test
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build/ci
+        run: dotnet run --project tests/dotnet/KhzDependencyRewrite/KhzDependencyRewrite.csproj -c Release
+
       - name: Managed OPC package test
         run: dotnet run --project tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj -c Release
 
