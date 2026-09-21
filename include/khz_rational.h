@@ -47,8 +47,9 @@ KhzSheetStatus khz_rational_div(KhzRational a, KhzRational b, KhzRational *out);
 KhzSheetStatus khz_rational_neg(KhzRational a, KhzRational *out);
 KhzSheetStatus khz_rational_abs(KhzRational a, KhzRational *out);
 
-/* *cmp receives -1, 0 or 1. Comparison is exact; if the cross products do not
-   fit in int64 the result is KHZ_SHEET_ERR_OVERFLOW, not a guess. */
+/* *cmp receives -1, 0 or 1. Comparison is exact and does not form potentially
+   overflowing cross-products; every pair of valid KhzRational values is
+   orderable. */
 KhzSheetStatus khz_rational_compare(KhzRational a, KhzRational b, int *cmp);
 
 /* 1 when den == 1, else 0. A malformed input reports 0. */

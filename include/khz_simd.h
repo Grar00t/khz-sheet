@@ -75,12 +75,10 @@ KhzSheetStatus khz_simd_max_i64(const int64_t *values, size_t count, int64_t *ou
 
 /* Smallest and largest rational, compared exactly.
 
-   Scalar by necessity: comparing a/b against c/d is a cross multiplication, and
-   there is no vector 128-bit product to make it safe. Unlike the int64 forms,
-   these can return KHZ_SHEET_ERR_OVERFLOW - not from the selection but from
-   khz_rational_compare, when the cross products do not fit in int64. An
-   overflowing comparison is reported rather than guessed at, so a MIN over
-   pathological denominators refuses instead of returning the wrong element.
+   Scalar by necessity: arbitrary rational ordering does not map cleanly onto
+   the fixed-width SIMD lanes used here. khz_rational_compare uses an
+   overflow-free quotient/remainder comparison, so selection itself has no
+   cross-product overflow path and always returns one of the valid inputs.
 
    count == 0 is KHZ_SHEET_ERR_RANGE. */
 KhzSheetStatus khz_simd_min_rational(const KhzRational *values, size_t count,
