@@ -163,13 +163,14 @@ static KhzSheetStatus khz_sheet_commit_preflight(const KhzSheet *sheet,
     return KHZ_SHEET_OK;
 }
 
-static KhzSheetStatus khz_sheet_log_append(KhzSheet *sheet, const KhzCell *cell)
+static KhzSheetStatus khz_sheet_log_append(KhzSheet *sheet, const KhzCell *cell,
+                                           const unsigned char previous[KHZ_SHA256_DIGEST_BYTES])
 {
     KhzCommitLog *log = &sheet->log;
     KhzCommitEntry *slot;
 
     if (log->entries == NULL || log->capacity == (size_t)0
-        || log->next >= log->capacity) {
+        || log->next >= log->capacity || previous == NULL) {
         return KHZ_SHEET_ERR_STATE;
     }
     if (log->recorded == UINT64_MAX) return KHZ_SHEET_ERR_OVERFLOW;
@@ -183,6 +184,7 @@ static KhzSheetStatus khz_sheet_log_append(KhzSheet *sheet, const KhzCell *cell)
 
     slot->key = khz_cell_key(cell->col, cell->row);
     slot->revision = cell->revision;
+    memcpy(slot->prev, previous, KHZ_CELL_PROOF_BYTES);
     memcpy(slot->head, cell->proof, KHZ_CELL_PROOF_BYTES);
     log->next = (log->next + (size_t)1) % log->capacity;
     log->recorded += (uint64_t)1;
@@ -191,10 +193,12 @@ static KhzSheetStatus khz_sheet_log_append(KhzSheet *sheet, const KhzCell *cell)
 
 static KhzSheetStatus khz_sheet_commit_cell(KhzSheet *sheet, KhzCell *cell)
 {
+    unsigned char previous[KHZ_SHA256_DIGEST_BYTES];
     KhzSheetStatus status = khz_sheet_commit_preflight(sheet, cell);
 
     if (status != KHZ_SHEET_OK) return status;
 
+    memcpy(previous, sheet->proof, sizeof previous);
     status = khz_cell_commit(cell, sheet->proof);
     if (status != KHZ_SHEET_OK) return status;
 
@@ -202,7 +206,7 @@ static KhzSheetStatus khz_sheet_commit_cell(KhzSheet *sheet, KhzCell *cell)
        no counter can overflow and the log has a valid destination slot. */
     memcpy(sheet->proof, cell->proof, sizeof sheet->proof);
     sheet->commits += (uint64_t)1;
-    return khz_sheet_log_append(sheet, cell);
+    return khz_sheet_log_append(sheet, cell, previous);
 }
 
 static void khz_sheet_dirty_direct(KhzSheet *sheet, size_t index)
@@ -648,6 +652,12 @@ KhzSheetStatus khz_sheet_audit_chain(const KhzSheet *sheet, KhzChainAudit *audit
         uint32_t row = 0u;
 
         ++local.entries_examined;
+        if (khz_hash_equal_ct(entry->prev, link, KHZ_CELL_PROOF_BYTES) == 0) {
+            local.failed_entry = i;
+            if (audit != NULL) *audit = local;
+            return KHZ_SHEET_ERR_FORMAT;
+        }
+
         status = khz_cell_key_split(entry->key, &col, &row);
         if (status != KHZ_SHEET_OK) {
             local.failed_entry = i;
