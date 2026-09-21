@@ -27,6 +27,12 @@
    10^18 fits int64; a further digit would not. */
 #define KHZ_XLSX_MAX_SCALE ((int64_t)1000000000000000000)
 
+/* A nonzero rational whose numerator and denominator both fit int64 cannot
+   survive more than a few dozen decimal shifts. Capping the work at 38 keeps
+   hostile exponents bounded; representability is still decided by the exact
+   rational multiply below, not by this coarse limit. */
+#define KHZ_XLSX_MAX_EXPONENT_STEPS ((uint32_t)38)
+
 static const char *khz_xml_find(const char *hay, size_t hay_len, const char *needle)
 {
 	size_t needle_len = strlen(needle);
@@ -161,17 +167,57 @@ static KhzSheetStatus khz_xml_decode(KhzArena *arena, const char *src, size_t le
 	return KHZ_SHEET_OK;
 }
 
-/* Decimal text to an exact rational: "3.25" becomes 13/4, not 3.25 as a
-   double. Exponent notation is refused rather than approximated, and a value
-   with more precision than int64 can carry is an overflow, not a rounding. */
+static KhzSheetStatus khz_xlsx_apply_exponent(KhzRational value,
+                                               int exponent_negative,
+                                               uint32_t exponent,
+                                               KhzRational *out)
+{
+	KhzRational factor;
+	KhzSheetStatus status;
+
+	if (out == NULL) {
+		return KHZ_SHEET_ERR_NULL;
+	}
+
+	if (value.num == (int64_t)0 || exponent == (uint32_t)0) {
+		*out = value;
+		return KHZ_SHEET_OK;
+	}
+
+	factor.num = exponent_negative != 0 ? (int64_t)1 : (int64_t)10;
+	factor.den = exponent_negative != 0 ? (int64_t)10 : (int64_t)1;
+
+	while (exponent != (uint32_t)0) {
+		status = khz_rational_mul(value, factor, &value);
+		if (status != KHZ_SHEET_OK) {
+			return status;
+		}
+		exponent -= (uint32_t)1;
+	}
+
+	*out = value;
+	return KHZ_SHEET_OK;
+}
+
+/* Decimal/exponent text to an exact rational. "3.25" becomes 13/4 and
+   "1e-8" becomes 1/100000000. No floating conversion is involved. If the
+   exact expanded value cannot fit the rational contract, overflow is returned
+   rather than rounding to a nearby value. */
 static KhzSheetStatus khz_xlsx_parse_number(const char *text, size_t len, KhzRational *out)
 {
 	int64_t mantissa = 0;
 	int64_t scale = 1;
+	KhzRational value;
+	KhzSheetStatus status;
 	size_t at = 0;
+	uint32_t exponent = 0u;
 	int negative = 0;
 	int seen_digit = 0;
 	int seen_point = 0;
+	int seen_exponent = 0;
+	int exponent_negative = 0;
+	int exponent_digit = 0;
+	int exponent_too_large = 0;
 
 	if (text == NULL || out == NULL) {
 		return KHZ_SHEET_ERR_NULL;
@@ -191,17 +237,18 @@ static KhzSheetStatus khz_xlsx_parse_number(const char *text, size_t len, KhzRat
 	for (; at < len; ++at) {
 		char ch = text[at];
 
+		if (ch == 'e' || ch == 'E') {
+			seen_exponent = 1;
+			at += 1u;
+			break;
+		}
+
 		if (ch == '.') {
 			if (seen_point != 0) {
 				return KHZ_SHEET_ERR_FORMAT;
 			}
-
 			seen_point = 1;
 			continue;
-		}
-
-		if (ch == 'e' || ch == 'E') {
-			return KHZ_SHEET_ERR_UNSUPPORTED;
 		}
 
 		if (ch < '0' || ch > '9') {
@@ -219,7 +266,6 @@ static KhzSheetStatus khz_xlsx_parse_number(const char *text, size_t len, KhzRat
 			if (scale > KHZ_XLSX_MAX_SCALE / 10) {
 				return KHZ_SHEET_ERR_OVERFLOW;
 			}
-
 			scale *= 10;
 		}
 	}
@@ -228,11 +274,63 @@ static KhzSheetStatus khz_xlsx_parse_number(const char *text, size_t len, KhzRat
 		return KHZ_SHEET_ERR_FORMAT;
 	}
 
+	if (seen_exponent != 0) {
+		if (at >= len) {
+			return KHZ_SHEET_ERR_FORMAT;
+		}
+		if (text[at] == '-' || text[at] == '+') {
+			exponent_negative = text[at] == '-' ? 1 : 0;
+			at += 1u;
+		}
+		if (at >= len) {
+			return KHZ_SHEET_ERR_FORMAT;
+		}
+
+		for (; at < len; ++at) {
+			char ch = text[at];
+			uint32_t digit;
+
+			if (ch < '0' || ch > '9') {
+				return KHZ_SHEET_ERR_FORMAT;
+			}
+			exponent_digit = 1;
+			digit = (uint32_t)(ch - '0');
+
+			if (exponent_too_large == 0) {
+				if (exponent > (KHZ_XLSX_MAX_EXPONENT_STEPS - digit) / (uint32_t)10) {
+					exponent_too_large = 1;
+				} else {
+					exponent = exponent * (uint32_t)10 + digit;
+				}
+			}
+		}
+
+		if (exponent_digit == 0) {
+			return KHZ_SHEET_ERR_FORMAT;
+		}
+	}
+
 	if (negative != 0) {
 		mantissa = -mantissa;
 	}
 
-	return khz_rational_make(mantissa, scale, out);
+	status = khz_rational_make(mantissa, scale, &value);
+	if (status != KHZ_SHEET_OK) {
+		return status;
+	}
+
+	/* Zero is unchanged by any finite decimal exponent. We still parsed every
+	   exponent character above so malformed zero literals are not accepted. */
+	if (value.num == (int64_t)0) {
+		*out = value;
+		return KHZ_SHEET_OK;
+	}
+
+	if (exponent_too_large != 0) {
+		return KHZ_SHEET_ERR_OVERFLOW;
+	}
+
+	return khz_xlsx_apply_exponent(value, exponent_negative, exponent, out);
 }
 
 KhzSheetStatus khz_xlsx_reader_check_package(KhzXlsxReader *reader)
@@ -611,13 +709,6 @@ KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *shee
 
 			status = khz_xlsx_parse_number(value_open,
 			                               (size_t)(value_close - value_open), &value);
-
-			if (status == KHZ_SHEET_ERR_UNSUPPORTED) {
-				/* Exponent notation. Counted rather than approximated. */
-				reader->report.cells_unsupported += 1u;
-				cursor = body_end + 4;
-				continue;
-			}
 
 			if (status != KHZ_SHEET_OK) {
 				return status;
