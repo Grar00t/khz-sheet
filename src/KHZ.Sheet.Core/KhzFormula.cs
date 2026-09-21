@@ -21,6 +21,7 @@ namespace KHZ.Sheet.Core
 		Average = 9,
 		Min = 10,
 		Max = 11,
+		Power = 12,
 	}
 
 	/// <summary>An exact rational, mirroring KhzRational.</summary>
@@ -128,17 +129,10 @@ namespace KHZ.Sheet.Core
 			}
 			catch (DllNotFoundException)
 			{
-				/* The native library is genuinely absent. That is an environment
-				   failure rather than an expected formula outcome, so it is one of
-				   the few places an exception is allowed to be caught and turned
-				   into a status instead of propagating. */
 				return SheetStatus.ErrState;
 			}
 			catch (EntryPointNotFoundException)
 			{
-				/* An older library without the Phase 94 ABI queries. Refusing is
-				   correct: falling back to 256 would reinstate exactly the
-				   assumption this method exists to remove. */
 				return SheetStatus.ErrUnsupported;
 			}
 
@@ -148,8 +142,6 @@ namespace KHZ.Sheet.Core
 			}
 			if (reported > (ulong)StackBlockBytes)
 			{
-				/* KhzFormula outgrew the reserved window. Raising StackBlockBytes
-				   and rebuilding is the fix; guessing is not. */
 				return SheetStatus.ErrLimit;
 			}
 
@@ -199,23 +191,11 @@ namespace KHZ.Sheet.Core
 	}
 
 	/// <summary>
-	/// Lowers the managed syntax tree onto the C formula IR.
-	///
-	/// The boundary is Option A: C owns the IR, evaluates it, and commits the
-	/// result onto the proof chain. Nothing here computes a value. This class
-	/// only translates shapes, so there is exactly one evaluator in the system
-	/// and no possibility of the managed and native answers disagreeing.
-	///
-	/// Every method returns SheetStatus. No exception is thrown for a formula a
-	/// user could plausibly type: an unsupported operator, a bad reference and a
-	/// parse failure are all return codes.
+	/// Lowers the managed syntax tree onto the C formula IR. C owns evaluation;
+	/// this layer translates shapes only and never computes an answer itself.
 	/// </summary>
 	public static unsafe class KhzFormula
 	{
-		/// <summary>
-		/// sizeof(KhzFormula) as reported by the loaded library, or zero when it
-		/// could not be resolved. Exposed so a caller can log what it bound to.
-		/// </summary>
 		public static ulong NativeFormulaBytes
 		{
 			get
@@ -227,11 +207,6 @@ namespace KHZ.Sheet.Core
 			}
 		}
 
-		/// <summary>
-		/// Parses and installs a formula from its source text, letting the C
-		/// parser do the work. This is the preferred path: the text is the only
-		/// representation both layers agree on exactly.
-		/// </summary>
 		public static SheetStatus SetFormula(IntPtr sheet, uint col, uint row, string source,
 		                                     out FormulaParseFailure failure)
 		{
@@ -263,7 +238,6 @@ namespace KHZ.Sheet.Core
 			return (SheetStatus)status;
 		}
 
-		/// <summary>Recalculates the formula cells that are marked dirty.</summary>
 		public static SheetStatus Recalculate(IntPtr sheet, out ulong evaluated)
 		{
 			ulong count = 0UL;
@@ -283,15 +257,9 @@ namespace KHZ.Sheet.Core
 				evaluated = count;
 			}
 
-			/* ErrCycle here means a circular reference and nothing was written. */
 			return (SheetStatus)status;
 		}
 
-		/// <summary>
-		/// Lowers a managed tree into native IR, declares its dependencies, then
-		/// releases the tree. Used when the managed parser has already run, for
-		/// instance over a formula read out of a workbook.
-		/// </summary>
 		public static SheetStatus DeclareDependencies(IntPtr sheet, IntPtr arena, uint col, uint row,
 		                                              FormulaNode node, out ulong declared)
 		{
@@ -337,8 +305,6 @@ namespace KHZ.Sheet.Core
 
 			ulong count = 0UL;
 			status = KhzNativeFormula.DeclareDependencies(sheet, block, &count);
-
-			/* The tree is scratch on the native arena. Abandoning returns it. */
 			KhzNativeFormula.Abandon(block);
 
 			if (status == 0)
@@ -349,7 +315,6 @@ namespace KHZ.Sheet.Core
 			return (SheetStatus)status;
 		}
 
-		/// <summary>Lowers a managed tree and evaluates it without storing it.</summary>
 		public static SheetStatus Evaluate(IntPtr sheet, IntPtr arena, uint col, uint row,
 		                                   FormulaNode node, out KhzFormulaResult result)
 		{
@@ -399,7 +364,6 @@ namespace KHZ.Sheet.Core
 			}
 
 			KhzNativeFormula.Abandon(block);
-
 			return (SheetStatus)status;
 		}
 
@@ -419,54 +383,24 @@ namespace KHZ.Sheet.Core
 			switch (node)
 			{
 				case NumberNode number:
-					/* The node is passed whole, not just its double, so the exact
-					   literal text can be used when it is present. */
 					return LowerNumber(block, number, ref result);
-
 				case GroupNode group:
-					/* Parentheses are a text artefact; the tree already has the
-					   grouping in its shape. */
 					return Lower(block, group.Inner, depth + 1, ref result);
-
 				case ReferenceNode reference:
 					return LowerReference(block, reference.Text, ref result);
-
 				case UnaryNode unary:
 					return LowerUnary(block, unary, depth, ref result);
-
 				case PostfixNode postfix:
 					return LowerPostfix(block, postfix, depth, ref result);
-
 				case BinaryNode binary:
 					return LowerBinary(block, binary, depth, ref result);
-
 				case FunctionNode function:
 					return LowerFunction(block, function, depth, ref result);
-
 				default:
-					/* Text, Boolean, Error, Name and Missing have no IR operation.
-					   They are refused rather than approximated, because a text
-					   literal silently lowered to zero is a wrong answer that
-					   looks like a right one. */
 					return SheetStatus.ErrUnsupported;
 			}
 		}
 
-		/// <summary>
-		/// Lowers a numeric literal to an exact rational constant.
-		///
-		/// Two paths, and which one is taken depends only on whether the node
-		/// carries its source text:
-		///
-		/// With RawText, the digits are converted straight to num/den and no
-		/// double is consulted. This is the correct path and, since Push H, the
-		/// one every parsed formula takes.
-		///
-		/// Without it, FromDouble reconstructs a rational from the double. That
-		/// is a repair for information already lost, kept only because the
-		/// one-argument NumberNode constructor still exists and a caller
-		/// building a tree by hand may use it.
-		/// </summary>
 		private static SheetStatus LowerNumber(byte* block, NumberNode number, ref IntPtr result)
 		{
 			if (number == null)
@@ -475,27 +409,19 @@ namespace KHZ.Sheet.Core
 			}
 
 			KhzRational rational;
-
-			/* Bound to a local so the null check is one the compiler can follow,
-			   and so the value cannot change between the test and the use. */
 			string? raw = number.RawText;
 
 			if (raw != null)
 			{
 				SheetStatus exact = TryExactRational(raw, out rational);
-
 				if (exact != SheetStatus.Ok)
 				{
-					/* No silent fall back to the double path. A literal that has
-					   no exact int64 rational is refused; approximating it here
-					   would defeat the entire point of carrying the text. */
 					return exact;
 				}
 			}
 			else
 			{
 				SheetStatus repaired = FromDouble(number.Value, out rational);
-
 				if (repaired != SheetStatus.Ok)
 				{
 					return repaired;
@@ -504,38 +430,13 @@ namespace KHZ.Sheet.Core
 
 			IntPtr node = IntPtr.Zero;
 			int status = KhzNativeFormula.Const(block, rational, &node);
-
 			if (status == 0)
 			{
 				result = node;
 			}
-
 			return (SheetStatus)status;
 		}
 
-		/// <summary>
-		/// Converts a decimal literal, exactly as written, into an int64
-		/// rational. No floating point is involved at any point.
-		///
-		/// The grammar accepted is the lexer's: optional sign, digits with an
-		/// optional single decimal point, optional e or E exponent with its own
-		/// optional sign. Anything else is ErrFormat rather than a partial
-		/// conversion of the part that happened to parse.
-		///
-		/// The value is mantissa * 10^(exponent - fractionDigits). A positive
-		/// net exponent scales the numerator; a negative one becomes the
-		/// denominator. Both are checked before every multiply, so an overflow
-		/// is ErrOverflow and never a wrapped value.
-		///
-		/// The result is reduced by gcd, which is what makes trailing zeros
-		/// irrelevant: 0.10 and 0.1 both arrive as 1/10, and 50.00 as 50/1.
-		/// Reduction also widens the range that fits, since 0.5000 reduces to
-		/// 1/2 rather than needing a denominator of 10000.
-		///
-		/// Exponents are handled rather than refused because they are exact:
-		/// 1e3 is 1000/1 and 2.5E-4 is 1/4000. There is no reason to reject a
-		/// value that has an exact representation.
-		/// </summary>
 		private static SheetStatus TryExactRational(string text, out KhzRational rational)
 		{
 			rational = default;
@@ -549,9 +450,6 @@ namespace KHZ.Sheet.Core
 			int n = text.Length;
 			bool negative = false;
 
-			/* The lexer does not put a sign on a number token - a leading minus
-			   is a UnaryNode - but accepting one here costs nothing and makes
-			   the method correct for a hand-built node too. */
 			if (text[i] == '+' || text[i] == '-')
 			{
 				negative = text[i] == '-';
@@ -573,7 +471,6 @@ namespace KHZ.Sheet.Core
 					{
 						return SheetStatus.ErrFormat;
 					}
-
 					seenPoint = true;
 					i++;
 					continue;
@@ -585,19 +482,13 @@ namespace KHZ.Sheet.Core
 				}
 
 				digits++;
-
-				/* Leading zeros are skipped rather than multiplied through, so
-				   0.0000000000000000000001 does not overflow the mantissa on
-				   its way to failing on the denominator. */
 				if (mantissa != 0UL || c != '0')
 				{
 					ulong digit = (ulong)(c - '0');
-
 					if (mantissa > (ulong.MaxValue - digit) / 10UL)
 					{
 						return SheetStatus.ErrOverflow;
 					}
-
 					mantissa = (mantissa * 10UL) + digit;
 				}
 
@@ -605,7 +496,6 @@ namespace KHZ.Sheet.Core
 				{
 					fractionDigits++;
 				}
-
 				i++;
 			}
 
@@ -615,13 +505,10 @@ namespace KHZ.Sheet.Core
 			}
 
 			int exponent = 0;
-
 			if (i < n && (text[i] == 'e' || text[i] == 'E'))
 			{
 				i++;
-
 				bool exponentNegative = false;
-
 				if (i < n && (text[i] == '+' || text[i] == '-'))
 				{
 					exponentNegative = text[i] == '-';
@@ -629,19 +516,13 @@ namespace KHZ.Sheet.Core
 				}
 
 				int exponentDigits = 0;
-
 				while (i < n && text[i] >= '0' && text[i] <= '9')
 				{
 					int digit = text[i] - '0';
-
-					/* An exponent beyond a few hundred cannot produce a value
-					   that fits either way, but it is bounded here so the
-					   accumulator itself cannot overflow. */
 					if (exponent > (int.MaxValue - digit) / 10)
 					{
 						return SheetStatus.ErrOverflow;
 					}
-
 					exponent = (exponent * 10) + digit;
 					exponentDigits++;
 					i++;
@@ -651,20 +532,16 @@ namespace KHZ.Sheet.Core
 				{
 					return SheetStatus.ErrFormat;
 				}
-
 				if (exponentNegative)
 				{
 					exponent = -exponent;
 				}
 			}
 
-			/* Trailing junk means the whole literal is rejected. Converting the
-			   prefix would accept 1.2.3 as 1.2. */
 			if (i != n)
 			{
 				return SheetStatus.ErrFormat;
 			}
-
 			if (mantissa > (ulong)long.MaxValue)
 			{
 				return SheetStatus.ErrOverflow;
@@ -682,29 +559,22 @@ namespace KHZ.Sheet.Core
 					{
 						return SheetStatus.ErrOverflow;
 					}
-
 					numerator *= 10L;
 				}
 			}
 			else if (netExponent < 0)
 			{
 				int scale = -netExponent;
-
 				for (int k = 0; k < scale; ++k)
 				{
 					if (denominator > long.MaxValue / 10L)
 					{
-						/* The value has no exact int64 rational. 1e-23 is a real
-						   number the format can express and this core cannot
-						   hold, so it is refused rather than rounded. */
 						return SheetStatus.ErrOverflow;
 					}
-
 					denominator *= 10L;
 				}
 
 				long divisor = Gcd(numerator, denominator);
-
 				if (divisor > 1L)
 				{
 					numerator /= divisor;
@@ -714,56 +584,31 @@ namespace KHZ.Sheet.Core
 
 			rational.Numerator = negative ? -numerator : numerator;
 			rational.Denominator = denominator;
-
 			return SheetStatus.Ok;
 		}
 
-		/// <summary>
-		/// Greatest common divisor of a non-negative numerator and a positive
-		/// denominator. Euclid, on unsigned values so no intermediate can be
-		/// negative. Gcd(0, d) is d, which reduces a zero numerator to 0/1.
-		/// </summary>
 		private static long Gcd(long a, long b)
 		{
 			ulong x = (ulong)a;
 			ulong y = (ulong)b;
-
 			while (y != 0UL)
 			{
 				ulong t = x % y;
 				x = y;
 				y = t;
 			}
-
 			return (long)x;
 		}
 
-		/// <summary>
-		/// Reconstructs a rational from a double, for nodes that carry no exact
-		/// text.
-		///
-		/// This is a repair, not a conversion. By the time a literal is a double
-		/// the value the user typed is gone: 0.1 is held as
-		/// 3602879701896397/36028797018963968, and casting that directly would
-		/// be exact but wrong. Formatting with "R" and re-parsing as decimal
-		/// recovers the shortest round-trippable decimal instead, so 0.1 comes
-		/// back as 1/10 - correct for the common cases and an inference in
-		/// general.
-		///
-		/// Nothing produced by FormulaParser reaches here any more. It remains
-		/// only for trees built through the one-argument NumberNode constructor.
-		/// </summary>
 		private static SheetStatus FromDouble(double value, out KhzRational rational)
 		{
 			rational = default;
-
 			if (double.IsNaN(value) || double.IsInfinity(value))
 			{
 				return SheetStatus.ErrOverflow;
 			}
 
 			decimal exact;
-
 			try
 			{
 				exact = decimal.Parse(value.ToString("R", CultureInfo.InvariantCulture),
@@ -780,9 +625,6 @@ namespace KHZ.Sheet.Core
 
 			Span<int> bits = stackalloc int[4];
 			decimal.GetBits(exact, bits);
-
-			/* A decimal is a 96-bit mantissa; anything above 64 bits has no int64
-			   numerator and is refused rather than truncated. */
 			if (bits[2] != 0)
 			{
 				return SheetStatus.ErrOverflow;
@@ -809,7 +651,6 @@ namespace KHZ.Sheet.Core
 
 			long numerator = (long)mantissa;
 			long divisor = Gcd(numerator, denominator);
-
 			if (divisor > 1L)
 			{
 				numerator /= divisor;
@@ -818,25 +659,15 @@ namespace KHZ.Sheet.Core
 
 			rational.Numerator = negative ? -numerator : numerator;
 			rational.Denominator = denominator;
-
 			return SheetStatus.Ok;
 		}
 
-		/// <summary>
-		/// Lowers a reference as written. A1 becomes a REF and A1:B3 a RANGE. The
-		/// A1 grammar itself is parsed by khz_formula_parse_ref so both layers
-		/// resolve a reference through exactly one implementation.
-		/// </summary>
 		private static SheetStatus LowerReference(byte* block, string text, ref IntPtr result)
 		{
 			if (string.IsNullOrEmpty(text))
 			{
 				return SheetStatus.ErrFormat;
 			}
-
-			/* A sheet qualifier names something this engine does not have yet. One
-			   sheet per workbook, so Sheet2!A1 is refused instead of being read as
-			   A1 on the only sheet there is. */
 			if (text.IndexOf('!') >= 0)
 			{
 				return SheetStatus.ErrUnsupported;
@@ -850,12 +681,10 @@ namespace KHZ.Sheet.Core
 			{
 				uint col, row;
 				SheetStatus parsed = ParseReference(text, out col, out row);
-
 				if (parsed != SheetStatus.Ok)
 				{
 					return parsed;
 				}
-
 				status = KhzNativeFormula.Ref(block, col, row, &node);
 			}
 			else
@@ -863,7 +692,6 @@ namespace KHZ.Sheet.Core
 				uint col0, row0, col1, row1;
 				SheetStatus left = ParseReference(text.Substring(0, colon), out col0, out row0);
 				SheetStatus right = ParseReference(text.Substring(colon + 1), out col1, out row1);
-
 				if (left != SheetStatus.Ok)
 				{
 					return left;
@@ -872,7 +700,6 @@ namespace KHZ.Sheet.Core
 				{
 					return right;
 				}
-
 				status = KhzNativeFormula.Range(block, col0, row0, col1, row1, &node);
 			}
 
@@ -880,7 +707,6 @@ namespace KHZ.Sheet.Core
 			{
 				result = node;
 			}
-
 			return (SheetStatus)status;
 		}
 
@@ -889,7 +715,6 @@ namespace KHZ.Sheet.Core
 			uint c = 0u;
 			uint r = 0u;
 			int status;
-
 			col = 0u;
 			row = 0u;
 
@@ -899,7 +724,6 @@ namespace KHZ.Sheet.Core
 			}
 
 			byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(text);
-
 			fixed (byte* p = utf8)
 			{
 				status = KhzNativeFormula.ParseRef(p, (nuint)utf8.Length, &c, &r);
@@ -910,7 +734,6 @@ namespace KHZ.Sheet.Core
 				col = c;
 				row = r;
 			}
-
 			return (SheetStatus)status;
 		}
 
@@ -918,7 +741,6 @@ namespace KHZ.Sheet.Core
 		{
 			IntPtr operand = IntPtr.Zero;
 			SheetStatus lowered = Lower(block, unary.Operand, depth + 1, ref operand);
-
 			if (lowered != SheetStatus.Ok)
 			{
 				return lowered;
@@ -926,7 +748,6 @@ namespace KHZ.Sheet.Core
 
 			if (unary.Operator == "+")
 			{
-				/* Unary plus is identity. */
 				result = operand;
 				return SheetStatus.Ok;
 			}
@@ -934,15 +755,9 @@ namespace KHZ.Sheet.Core
 			{
 				return SheetStatus.ErrUnsupported;
 			}
-
 			return Combine(block, KhzFormulaOp.Negate, operand, IntPtr.Zero, ref result);
 		}
 
-		/// <summary>
-		/// A trailing percent is a division by one hundred, lowered as such. There
-		/// is no PERCENT operation in the IR because there does not need to be: 5%
-		/// is exactly 1/20 and the rational arithmetic keeps it that way.
-		/// </summary>
 		private static SheetStatus LowerPostfix(byte* block, PostfixNode postfix, int depth,
 		                                        ref IntPtr result)
 		{
@@ -953,7 +768,6 @@ namespace KHZ.Sheet.Core
 
 			IntPtr operand = IntPtr.Zero;
 			SheetStatus lowered = Lower(block, postfix.Operand, depth + 1, ref operand);
-
 			if (lowered != SheetStatus.Ok)
 			{
 				return lowered;
@@ -962,15 +776,12 @@ namespace KHZ.Sheet.Core
 			KhzRational hundred;
 			hundred.Numerator = 100L;
 			hundred.Denominator = 1L;
-
 			IntPtr divisor = IntPtr.Zero;
 			int status = KhzNativeFormula.Const(block, hundred, &divisor);
-
 			if (status != 0)
 			{
 				return (SheetStatus)status;
 			}
-
 			return Combine(block, KhzFormulaOp.Divide, operand, divisor, ref result);
 		}
 
@@ -985,16 +796,13 @@ namespace KHZ.Sheet.Core
 				case "-": op = KhzFormulaOp.Subtract; break;
 				case "*": op = KhzFormulaOp.Multiply; break;
 				case "/": op = KhzFormulaOp.Divide; break;
+				case "^": op = KhzFormulaOp.Power; break;
 				default:
-					/* Exponent, concatenation, the comparisons, union and
-					   intersection are all real Excel operators with no IR
-					   operation behind them yet. Refused, not faked. */
 					return SheetStatus.ErrUnsupported;
 			}
 
 			IntPtr left = IntPtr.Zero;
 			SheetStatus lowered = Lower(block, binary.Left, depth + 1, ref left);
-
 			if (lowered != SheetStatus.Ok)
 			{
 				return lowered;
@@ -1002,7 +810,6 @@ namespace KHZ.Sheet.Core
 
 			IntPtr right = IntPtr.Zero;
 			lowered = Lower(block, binary.Right, depth + 1, ref right);
-
 			if (lowered != SheetStatus.Ok)
 			{
 				return lowered;
@@ -1027,19 +834,10 @@ namespace KHZ.Sheet.Core
 				case "MIN": op = KhzFormulaOp.Min; break;
 				case "MAX": op = KhzFormulaOp.Max; break;
 				default:
-					/* Four functions exist. Every other name is refused here and
-					   would be #NAME? in a cell. */
 					return SheetStatus.ErrUnsupported;
 			}
 
-			/* Bound to a local, then checked once. The previous form tested
-			   function.Arguments for null inside a conditional and indexed it two
-			   statements later, which is provable to a reader but not to flow
-			   analysis - hence CS8602. Suppressing that with ! would have been
-			   the wrong answer: nothing in the method's own text guaranteed the
-			   property returned the same non-null value on the second read. */
 			IReadOnlyList<FormulaNode>? arguments = function.Arguments;
-
 			if (arguments == null)
 			{
 				return SheetStatus.ErrFormat;
@@ -1052,28 +850,23 @@ namespace KHZ.Sheet.Core
 			}
 
 			IntPtr* children = stackalloc IntPtr[count];
-
 			for (int i = 0; i < count; ++i)
 			{
 				IntPtr child = IntPtr.Zero;
 				SheetStatus lowered = Lower(block, arguments[i], depth + 1, ref child);
-
 				if (lowered != SheetStatus.Ok)
 				{
 					return lowered;
 				}
-
 				children[i] = child;
 			}
 
 			IntPtr node = IntPtr.Zero;
 			int status = KhzNativeFormula.Node(block, (int)op, children, (nuint)count, &node);
-
 			if (status == 0)
 			{
 				result = node;
 			}
-
 			return (SheetStatus)status;
 		}
 
@@ -1082,7 +875,6 @@ namespace KHZ.Sheet.Core
 		{
 			IntPtr* children = stackalloc IntPtr[2];
 			nuint count;
-
 			children[0] = left;
 
 			if (right == IntPtr.Zero)
@@ -1097,34 +889,28 @@ namespace KHZ.Sheet.Core
 
 			IntPtr node = IntPtr.Zero;
 			int status = KhzNativeFormula.Node(block, (int)op, children, count, &node);
-
 			if (status == 0)
 			{
 				result = node;
 			}
-
 			return (SheetStatus)status;
 		}
 
 		private static FormulaParseFailure ReadFailure(ref KhzFormulaParseErrorNative error)
 		{
 			string expected = string.Empty;
-
 			fixed (byte* p = error.Expected)
 			{
 				int length = 0;
-
 				while (length < 32 && p[length] != 0)
 				{
 					++length;
 				}
-
 				if (length > 0)
 				{
 					expected = System.Text.Encoding.UTF8.GetString(p, length);
 				}
 			}
-
 			return new FormulaParseFailure((ulong)error.Offset, expected);
 		}
 	}
