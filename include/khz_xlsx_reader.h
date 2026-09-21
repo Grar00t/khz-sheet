@@ -109,8 +109,10 @@ KhzSheetStatus khz_xlsx_reader_shared_strings(KhzXlsxReader *reader);
 KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *sheet,
                                            const char *part_name);
 
-/* Convenience path for the conventional first worksheet. Relationship-based
- * worksheet resolution remains outside this helper's current scope. */
+/* Convenience path for the first workbook sheet. The worksheet part is
+ * resolved from workbook.xml's r:id through xl/_rels/workbook.xml.rels rather
+ * than guessed from a conventional filename. External relationship targets,
+ * unsafe path forms and missing relationship records are refused. */
 KhzSheetStatus khz_xlsx_reader_read(KhzXlsxReader *reader, KhzSheet *sheet,
                                     const void *bytes, size_t size);
 

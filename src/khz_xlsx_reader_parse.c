@@ -272,7 +272,11 @@ KhzSheetStatus khz_xlsx_reader_check_package(KhzXlsxReader *reader)
 	if (status != KHZ_SHEET_OK) return status;
 	status = khz_xlsx_reader_find(reader, "xl/workbook.xml", &entry);
 	if (status != KHZ_SHEET_OK) return status;
+	status = khz_xlsx_reader_find(reader, "xl/_rels/workbook.xml.rels", &entry);
+	if (status != KHZ_SHEET_OK) return status;
 
+	status = khz_xlsx_reader_find(reader, "xl/workbook.xml", &entry);
+	if (status != KHZ_SHEET_OK) return status;
 	if (khz_xml_find((const char *)entry->data, entry->size, "<sheet ") == NULL) {
 		return KHZ_SHEET_ERR_FORMAT;
 	}
@@ -495,9 +499,152 @@ KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *shee
 	return KHZ_SHEET_OK;
 }
 
+static int khz_xlsx_relationship_type_is_worksheet(const char *type, size_t type_len)
+{
+	static const char suffix[] = "/worksheet";
+	const size_t suffix_len = sizeof suffix - 1u;
+
+	return type != NULL && type_len >= suffix_len
+	    && memcmp(type + type_len - suffix_len, suffix, suffix_len) == 0;
+}
+
+static int khz_xlsx_part_target_is_safe(const char *target, size_t target_len)
+{
+	size_t segment = 0;
+	size_t at;
+
+	if (target == NULL || target_len == 0) return 0;
+
+	for (at = 0; at <= target_len; ++at) {
+		if (at < target_len) {
+			char ch = target[at];
+			if (ch == '\\' || ch == ':' || ch == '?' || ch == '#') return 0;
+			if (ch != '/') continue;
+		}
+
+		if (at == segment) return 0;
+		if (at - segment == 1u && target[segment] == '.') return 0;
+		if (at - segment == 2u && target[segment] == '.' && target[segment + 1u] == '.') return 0;
+		segment = at + 1u;
+	}
+
+	return 1;
+}
+
+static KhzSheetStatus khz_xlsx_workbook_target_to_part(const char *target,
+                                                        size_t target_len,
+                                                        char *out,
+                                                        size_t capacity)
+{
+	static const char prefix[] = "xl/";
+	const char *path = target;
+	size_t path_len = target_len;
+	size_t prefix_len = 0;
+
+	if (target == NULL || out == NULL) return KHZ_SHEET_ERR_NULL;
+	if (capacity == 0 || target_len == 0) return KHZ_SHEET_ERR_FORMAT;
+
+	if (path[0] == '/') {
+		path += 1;
+		path_len -= 1u;
+	} else {
+		prefix_len = sizeof prefix - 1u;
+	}
+
+	if (!khz_xlsx_part_target_is_safe(path, path_len)) return KHZ_SHEET_ERR_UNSUPPORTED;
+	if (prefix_len > capacity - 1u || path_len > capacity - 1u - prefix_len) {
+		return KHZ_SHEET_ERR_LIMIT;
+	}
+
+	if (prefix_len != 0) memcpy(out, prefix, prefix_len);
+	memcpy(out + prefix_len, path, path_len);
+	out[prefix_len + path_len] = '\0';
+	return KHZ_SHEET_OK;
+}
+
+static KhzSheetStatus khz_xlsx_reader_first_sheet_part(KhzXlsxReader *reader,
+                                                        char *out,
+                                                        size_t capacity)
+{
+	const KhzXlsxEntry *workbook;
+	const KhzXlsxEntry *rels;
+	const char *sheet;
+	const char *sheet_end;
+	const char *sheet_id;
+	size_t sheet_id_len;
+	const char *cursor;
+	const char *limit;
+	KhzSheetStatus status;
+
+	if (reader == NULL || out == NULL) return KHZ_SHEET_ERR_NULL;
+	if (reader->loaded == 0) return KHZ_SHEET_ERR_STATE;
+
+	status = khz_xlsx_reader_find(reader, "xl/workbook.xml", &workbook);
+	if (status != KHZ_SHEET_OK) return status;
+	status = khz_xlsx_reader_find(reader, "xl/_rels/workbook.xml.rels", &rels);
+	if (status != KHZ_SHEET_OK) return status;
+
+	sheet = khz_xml_find((const char *)workbook->data, workbook->size, "<sheet ");
+	if (sheet == NULL) return KHZ_SHEET_ERR_FORMAT;
+	sheet_end = khz_xml_find(sheet, workbook->size - (size_t)(sheet - (const char *)workbook->data), ">");
+	if (sheet_end == NULL) return KHZ_SHEET_ERR_FORMAT;
+	if (khz_xml_attr(sheet, (size_t)(sheet_end - sheet), "r:id", &sheet_id, &sheet_id_len) == 0
+	    || sheet_id_len == 0) {
+		return KHZ_SHEET_ERR_FORMAT;
+	}
+
+	cursor = (const char *)rels->data;
+	limit = cursor + rels->size;
+	while (cursor < limit) {
+		const char *rel = khz_xml_find(cursor, (size_t)(limit - cursor), "<Relationship ");
+		const char *rel_end;
+		const char *id;
+		const char *type;
+		const char *target;
+		const char *target_mode;
+		size_t rel_len;
+		size_t id_len;
+		size_t type_len;
+		size_t target_len;
+		size_t target_mode_len;
+		char *decoded;
+		size_t decoded_len;
+
+		if (rel == NULL) break;
+		rel_end = khz_xml_find(rel, (size_t)(limit - rel), ">");
+		if (rel_end == NULL) return KHZ_SHEET_ERR_FORMAT;
+		rel_len = (size_t)(rel_end - rel);
+
+		if (khz_xml_attr(rel, rel_len, "Id", &id, &id_len) != 0
+		    && id_len == sheet_id_len && memcmp(id, sheet_id, id_len) == 0) {
+			if (khz_xml_attr(rel, rel_len, "Type", &type, &type_len) == 0
+			    || !khz_xlsx_relationship_type_is_worksheet(type, type_len)) {
+				return KHZ_SHEET_ERR_FORMAT;
+			}
+			if (khz_xml_attr(rel, rel_len, "TargetMode", &target_mode, &target_mode_len) != 0) {
+				if (target_mode_len != 8u || memcmp(target_mode, "Internal", 8u) != 0) {
+					return KHZ_SHEET_ERR_UNSUPPORTED;
+				}
+			}
+			if (khz_xml_attr(rel, rel_len, "Target", &target, &target_len) == 0
+			    || target_len == 0) {
+				return KHZ_SHEET_ERR_FORMAT;
+			}
+			status = khz_xml_decode(reader->arena, target, target_len, &decoded, &decoded_len);
+			if (status != KHZ_SHEET_OK) return status;
+			return khz_xlsx_workbook_target_to_part(decoded, decoded_len, out, capacity);
+		}
+
+		cursor = rel_end + 1;
+	}
+
+	return KHZ_SHEET_ERR_MISSING;
+}
+
 KhzSheetStatus khz_xlsx_reader_read(KhzXlsxReader *reader, KhzSheet *sheet,
                                     const void *bytes, size_t size)
 {
+	char part_name[KHZ_XLSX_READER_MAX_NAME + 1u];
 	KhzSheetStatus status;
 
 	if (reader == NULL || sheet == NULL || bytes == NULL) return KHZ_SHEET_ERR_NULL;
@@ -505,7 +652,9 @@ KhzSheetStatus khz_xlsx_reader_read(KhzXlsxReader *reader, KhzSheet *sheet,
 	if (status != KHZ_SHEET_OK) return status;
 	status = khz_xlsx_reader_check_package(reader);
 	if (status != KHZ_SHEET_OK) return status;
+	status = khz_xlsx_reader_first_sheet_part(reader, part_name, sizeof part_name);
+	if (status != KHZ_SHEET_OK) return status;
 	status = khz_xlsx_reader_shared_strings(reader);
 	if (status != KHZ_SHEET_OK) return status;
-	return khz_xlsx_reader_parse_sheet(reader, sheet, "xl/worksheets/sheet1.xml");
+	return khz_xlsx_reader_parse_sheet(reader, sheet, part_name);
 }

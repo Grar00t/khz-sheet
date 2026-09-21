@@ -15,6 +15,11 @@
 # Cell (column c, xlsx row r) holds 10*r + c. khz_xlsx_test.c recomputes that
 # same rule instead of hardcoding totals, so the fixture and the expectations
 # cannot drift apart.
+#
+# The worksheet deliberately does not use xl/worksheets/sheet1.xml. The
+# workbook points to it through r:id and xl/_rels/workbook.xml.rels so the
+# end-to-end reader test proves relationship-based part resolution rather than
+# succeeding by filename convention.
 
 import io
 import sys
@@ -22,6 +27,9 @@ import zipfile
 
 ROWS = 25
 COLS = 8
+WORKSHEET_PART = "xl/worksheets/data-sheet.xml"
+WORKSHEET_TARGET = "worksheets/data-sheet.xml"
+WORKSHEET_REL_ID = "rData7"
 
 NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -34,9 +42,9 @@ CONTENT_TYPES = (
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
     '<Default Extension="xml" ContentType="application/xml"/>'
     '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+    '<Override PartName="/%s" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
     "</Types>"
-) % NS_CT
+) % (NS_CT, WORKSHEET_PART)
 
 ROOT_RELS = (
     '<?xml version="1.0" encoding="UTF-8"?>'
@@ -48,16 +56,16 @@ ROOT_RELS = (
 WORKBOOK = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<workbook xmlns="%s"><sheets>'
-    '<sheet name="Sheet1" sheetId="1" r:id="rId1" xmlns:r="%s"/>'
+    '<sheet name="Sheet1" sheetId="1" r:id="%s" xmlns:r="%s"/>'
     "</sheets></workbook>"
-) % (NS_MAIN, NS_REL)
+) % (NS_MAIN, WORKSHEET_REL_ID, NS_REL)
 
 WORKBOOK_RELS = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<Relationships xmlns="%s">'
-    '<Relationship Id="rId1" Type="%s/worksheet" Target="worksheets/sheet1.xml"/>'
+    '<Relationship Id="%s" Type="%s/worksheet" Target="%s"/>'
     "</Relationships>"
-) % (NS_PKG_REL, NS_REL)
+) % (NS_PKG_REL, WORKSHEET_REL_ID, NS_REL, WORKSHEET_TARGET)
 
 
 def column_name(index):
@@ -91,7 +99,7 @@ def build():
         ("_rels/.rels", ROOT_RELS),
         ("xl/workbook.xml", WORKBOOK),
         ("xl/_rels/workbook.xml.rels", WORKBOOK_RELS),
-        ("xl/worksheets/sheet1.xml", worksheet()),
+        (WORKSHEET_PART, worksheet()),
     ]
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
