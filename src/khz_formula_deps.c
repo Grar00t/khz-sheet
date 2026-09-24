@@ -566,6 +566,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         }
 
         if (status != KHZ_SHEET_OK) {
+            *cell = previous;
             (void)khz_arena_release(arena, mark);
             return status;
         }
