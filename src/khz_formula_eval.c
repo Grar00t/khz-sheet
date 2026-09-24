@@ -183,6 +183,33 @@ static KhzSheetStatus khz_agg_push(KhzAgg *agg, KhzRational value)
     return KHZ_SHEET_OK;
 }
 
+/* Aggregate functions distinguish a cell reference from a scalar expression.
+   A referenced text, logical or blank cell does not contribute a number; an
+   error cell still propagates. Arithmetic outside an aggregate keeps the
+   coercion rules in khz_eval_ref, so A1+1 and SUM(A1) remain intentionally
+   different operations. */
+static KhzSheetStatus khz_agg_gather_cell(KhzAgg *agg, const KhzCell *cell,
+                                          KhzCellError *failed)
+{
+    if (agg == NULL || cell == NULL || failed == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
+    if (cell->kind == (uint32_t)KHZ_CELL_ERROR
+        || (cell->kind == (uint32_t)KHZ_CELL_FORMULA
+            && cell->error != (uint32_t)KHZ_CELL_ERROR_NONE)) {
+        *failed = (KhzCellError)cell->error;
+        return KHZ_SHEET_OK;
+    }
+
+    if (cell->kind != (uint32_t)KHZ_CELL_RATIONAL
+        && cell->kind != (uint32_t)KHZ_CELL_FORMULA) {
+        return KHZ_SHEET_OK;
+    }
+
+    return khz_agg_push(agg, cell->value);
+}
+
 /* Collects the operands of an aggregate. Returns OK with *failed set when a
    contributing cell holds an error, so the caller can propagate that error
    rather than average over it. */
@@ -192,8 +219,21 @@ static KhzSheetStatus khz_agg_gather(KhzSheet *sheet, const KhzFormulaNode *node
 {
     uint32_t i;
 
+    if (sheet == NULL || node == NULL || agg == NULL || failed == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+    if (node->child_count == 0u
+        || node->child_count > (uint32_t)KHZ_FORMULA_MAX_ARGS
+        || node->children == NULL) {
+        return KHZ_SHEET_ERR_FORMAT;
+    }
+
     for (i = 0u; i < node->child_count; ++i) {
         const KhzFormulaNode *child = node->children[i];
+
+        if (child == NULL) {
+            return KHZ_SHEET_ERR_FORMAT;
+        }
 
         if (child->op == (uint32_t)KHZ_FORMULA_RANGE) {
             size_t j;
@@ -206,24 +246,25 @@ static KhzSheetStatus khz_agg_gather(KhzSheet *sheet, const KhzFormulaNode *node
                     continue;
                 }
 
-                if (cell->kind == (uint32_t)KHZ_CELL_ERROR
-                    || (cell->kind == (uint32_t)KHZ_CELL_FORMULA
-                        && cell->error != (uint32_t)KHZ_CELL_ERROR_NONE)) {
-                    *failed = (KhzCellError)cell->error;
-                    return KHZ_SHEET_OK;
-                }
-
-                /* Text and blanks inside a range are skipped, not zeroed.
-                   AVERAGE over two numbers and a label is the mean of two. */
-                if (cell->kind != (uint32_t)KHZ_CELL_RATIONAL
-                    && cell->kind != (uint32_t)KHZ_CELL_FORMULA) {
-                    continue;
-                }
-
-                status = khz_agg_push(agg, cell->value);
-                if (status != KHZ_SHEET_OK) {
+                status = khz_agg_gather_cell(agg, cell, failed);
+                if (status != KHZ_SHEET_OK || *failed != KHZ_CELL_ERROR_NONE) {
                     return status;
                 }
+            }
+        } else if (child->op == (uint32_t)KHZ_FORMULA_REF) {
+            const KhzCell *cell = NULL;
+            KhzSheetStatus status = khz_sheet_get(sheet, child->col0, child->row0, &cell);
+
+            if (status == KHZ_SHEET_ERR_MISSING) {
+                continue;
+            }
+            if (status != KHZ_SHEET_OK) {
+                return status;
+            }
+
+            status = khz_agg_gather_cell(agg, cell, failed);
+            if (status != KHZ_SHEET_OK || *failed != KHZ_CELL_ERROR_NONE) {
+                return status;
             }
         } else {
             KhzFormulaResult scalar;
@@ -284,6 +325,9 @@ static KhzSheetStatus khz_agg_integer_lane(KhzSheet *sheet, const KhzAgg *agg,
            path so 1 and 2 average to 3/2. */
         return KHZ_SHEET_OK;
     }
+    if (agg->count > SIZE_MAX / sizeof(int64_t)) {
+        return KHZ_SHEET_ERR_LIMIT;
+    }
 
     mark = khz_arena_mark(arena);
 
@@ -331,20 +375,42 @@ static KhzSheetStatus khz_eval_aggregate(KhzSheet *sheet, const KhzFormulaNode *
     int handled = 0;
     uint32_t i;
 
+    if (node->child_count == 0u
+        || node->child_count > (uint32_t)KHZ_FORMULA_MAX_ARGS
+        || node->children == NULL) {
+        (void)khz_arena_release(arena, mark);
+        return KHZ_SHEET_ERR_FORMAT;
+    }
+
     for (i = 0u; i < node->child_count; ++i) {
         const KhzFormulaNode *child = node->children[i];
+        size_t add;
 
-        if (child->op == (uint32_t)KHZ_FORMULA_RANGE) {
-            capacity += khz_range_population(sheet, child);
-        } else {
-            capacity += (size_t)1;
+        if (child == NULL) {
+            (void)khz_arena_release(arena, mark);
+            return KHZ_SHEET_ERR_FORMAT;
         }
+
+        add = child->op == (uint32_t)KHZ_FORMULA_RANGE
+            ? khz_range_population(sheet, child)
+            : (size_t)1;
+
+        if (add > SIZE_MAX - capacity) {
+            (void)khz_arena_release(arena, mark);
+            return KHZ_SHEET_ERR_LIMIT;
+        }
+        capacity += add;
     }
 
     memset(&agg, 0, sizeof agg);
     agg.capacity = capacity;
 
     if (capacity > (size_t)0) {
+        if (capacity > SIZE_MAX / sizeof(KhzRational)) {
+            (void)khz_arena_release(arena, mark);
+            return KHZ_SHEET_ERR_LIMIT;
+        }
+
         agg.values = (KhzRational *)khz_arena_alloc(arena,
                                                     capacity * sizeof(KhzRational));
         if (agg.values == NULL) {
@@ -367,9 +433,9 @@ static KhzSheetStatus khz_eval_aggregate(KhzSheet *sheet, const KhzFormulaNode *
     if (agg.count == (size_t)0) {
         (void)khz_arena_release(arena, mark);
 
-        /* SUM of nothing is 0 and MIN of nothing is 0, matching what a
-           spreadsheet shows for an empty range. AVERAGE of nothing is
-           #DIV/0!, because the divisor really is zero. */
+        /* SUM, MIN and MAX of no numeric aggregate arguments are zero.
+           AVERAGE of no numeric arguments is #DIV/0! because the divisor is
+           zero. */
         if (node->op == (uint32_t)KHZ_FORMULA_AVG) {
             return khz_result_error(out, KHZ_CELL_ERROR_DIV0);
         }
@@ -591,6 +657,9 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
 
     switch ((KhzFormulaOp)node->op) {
     case KHZ_FORMULA_CONST:
+        if (!khz_rational_is_valid(node->value)) {
+            return KHZ_SHEET_ERR_FORMAT;
+        }
         return khz_result_value(out, node->value);
 
     case KHZ_FORMULA_REF:
@@ -608,7 +677,8 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
         return khz_eval_aggregate(sheet, node, depth + (size_t)1, out);
 
     case KHZ_FORMULA_NEG:
-        if (node->child_count != 1u) {
+        if (node->child_count != 1u || node->children == NULL
+            || node->children[0] == NULL) {
             return KHZ_SHEET_ERR_FORMAT;
         }
 
@@ -643,7 +713,8 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
     case KHZ_FORMULA_MUL:
     case KHZ_FORMULA_DIV:
     case KHZ_FORMULA_POW:
-        if (node->child_count != 2u) {
+        if (node->child_count != 2u || node->children == NULL
+            || node->children[0] == NULL || node->children[1] == NULL) {
             return KHZ_SHEET_ERR_FORMAT;
         }
 
