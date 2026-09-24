@@ -123,6 +123,50 @@ namespace KHZ.Sheet.Tests
 					Fail("re-read B1");
 				}
 
+				Console.WriteLine("aggregate cell references:");
+				Expect(sheet.SetText(9u, 0u, new byte[] { (byte)'x' }) == SheetStatus.Ok, "J1 = text");
+				Expect(sheet.SetBool(9u, 1u, true) == SheetStatus.Ok, "J2 = TRUE");
+				Expect(sheet.SetInt64(9u, 2u, 7L) == SheetStatus.Ok, "J3 = 7");
+
+				Expect(Install(sheet, 10u, 0u, "SUM(J1,J2,J3)", out _) == SheetStatus.Ok,
+					"K1 = SUM(J1,J2,J3)");
+				Expect(Install(sheet, 10u, 1u, "AVERAGE(J1,J2,J3)", out _) == SheetStatus.Ok,
+					"K2 = AVERAGE(J1,J2,J3)");
+				Expect(Install(sheet, 10u, 2u, "MIN(J1,J2,J3)", out _) == SheetStatus.Ok,
+					"K3 = MIN(J1,J2,J3)");
+				Expect(Install(sheet, 10u, 3u, "MAX(J1,J2,J3)", out _) == SheetStatus.Ok,
+					"K4 = MAX(J1,J2,J3)");
+				Expect(Install(sheet, 10u, 4u, "AVERAGE(J4)", out _) == SheetStatus.Ok,
+					"K5 = AVERAGE(blank reference)");
+
+				SheetStatus aggregateRecalc = sheet.TryRecalculate(out ulong aggregateEvaluated);
+				Expect(aggregateRecalc == SheetStatus.Ok, "aggregate recalculate -> " + aggregateRecalc);
+				Expect(aggregateEvaluated >= 5UL, "aggregate evaluated = " + aggregateEvaluated);
+
+				for (uint row = 0u; row < 4u; row++)
+				{
+					if (sheet.TryGetCell(10u, row, out KhzCellNative aggregate) == SheetStatus.Ok)
+					{
+						Expect(aggregate.ErrorCode == CellErrorCode.None
+							&& aggregate.Value.Num == 7L && aggregate.Value.Den == 1L,
+							"K" + (row + 1u) + " ignores text/logical references and equals 7/1");
+					}
+					else
+					{
+						Fail("read aggregate reference result K" + (row + 1u));
+					}
+				}
+
+				if (sheet.TryGetCell(10u, 4u, out KhzCellNative blankAverage) == SheetStatus.Ok)
+				{
+					Expect(blankAverage.ErrorCode == CellErrorCode.Div0,
+						"K5 = #DIV/0! when AVERAGE has no numeric reference values");
+				}
+				else
+				{
+					Fail("read K5");
+				}
+
 				Console.WriteLine("native source power parser:");
 				SheetStatus p1 = Install(sheet, 2u, 0u, "2^3", out string powerAccepted);
 				SheetStatus p2 = Install(sheet, 3u, 0u, "2^-3", out string negativeAccepted);

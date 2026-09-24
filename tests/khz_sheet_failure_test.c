@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "khz_formula.h"
 #include "khz_sheet.h"
 
 static int failures;
@@ -108,6 +109,49 @@ int main(void)
                     khz_arena_used(khz_sheet_arena(&tight)) == before);
 
         khz_sheet_destroy(&tight);
+    }
+
+    /* Recalculation must not publish a new cached value when the commit that
+       authenticates it is refused. Saturating the formula cell revision forces
+       commit preflight to fail after evaluation without requiring any corrupt
+       allocator or hash state. */
+    {
+        KhzSheet recalc;
+        KhzCell *formula_cell = NULL;
+        KhzRational old_value = { 0, 1 };
+        uint32_t old_error = (uint32_t)KHZ_CELL_ERROR_NONE;
+        uint32_t old_flags = 0u;
+        uint64_t evaluated = (uint64_t)0;
+
+        expect_status("recalc init", khz_sheet_init(&recalc, (size_t)1 << 20, (size_t)8),
+                      KHZ_SHEET_OK);
+        expect_status("recalc A1 = 1", khz_sheet_set_i64(&recalc, 0u, 0u, 1), KHZ_SHEET_OK);
+        expect_status("recalc B1 = A1",
+                      khz_formula_set(&recalc, 1u, 0u, "A1", (size_t)2, NULL), KHZ_SHEET_OK);
+        expect_status("initial formula recalc", khz_formula_recalc(&recalc, &evaluated),
+                      KHZ_SHEET_OK);
+        expect_status("recalc A1 = 2", khz_sheet_set_i64(&recalc, 0u, 0u, 2), KHZ_SHEET_OK);
+        expect_status("get mutable B1", khz_sheet_get_mutable(&recalc, 1u, 0u, &formula_cell),
+                      KHZ_SHEET_OK);
+
+        if (formula_cell != NULL) {
+            old_value = formula_cell->value;
+            old_error = formula_cell->error;
+            old_flags = formula_cell->flags;
+            formula_cell->revision = UINT64_MAX;
+
+            expect_status("recalc commit refusal", khz_formula_recalc(&recalc, &evaluated),
+                          KHZ_SHEET_ERR_OVERFLOW);
+            expect_true("recalc value restored after refusal",
+                        formula_cell->value.num == old_value.num
+                        && formula_cell->value.den == old_value.den);
+            expect_true("recalc error restored after refusal", formula_cell->error == old_error);
+            expect_true("recalc dirty state restored after refusal", formula_cell->flags == old_flags);
+            expect_true("recalc remains dirty after refusal",
+                        (formula_cell->flags & (uint32_t)KHZ_CELL_FLAG_DIRTY) != 0u);
+        }
+
+        khz_sheet_destroy(&recalc);
     }
 
     {

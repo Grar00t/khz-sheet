@@ -461,6 +461,9 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         KhzCell *cell;
         KhzFormula formula;
         KhzFormulaResult result;
+        KhzRational previous_value;
+        uint32_t previous_error;
+        uint32_t previous_flags;
         int changed;
 
         if (order[i] >= sheet->grid.cell_count) {
@@ -494,6 +497,9 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         }
 
         changed = khz_value_changed(cell, &result);
+        previous_value = cell->value;
+        previous_error = cell->error;
+        previous_flags = cell->flags;
 
         if (khz_deps_result_is_error(&result)) {
             cell->error = result.error;
@@ -505,6 +511,9 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         }
 
         if (status != KHZ_SHEET_OK) {
+            cell->value = previous_value;
+            cell->error = previous_error;
+            cell->flags = previous_flags;
             (void)khz_arena_release(arena, mark);
             return status;
         }
@@ -513,6 +522,9 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
         status = khz_sheet_commit_in_place(sheet, cell);
         if (status != KHZ_SHEET_OK) {
+            cell->value = previous_value;
+            cell->error = previous_error;
+            cell->flags = previous_flags;
             (void)khz_arena_release(arena, mark);
             return status;
         }
