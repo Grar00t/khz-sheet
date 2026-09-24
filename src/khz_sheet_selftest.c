@@ -177,11 +177,16 @@ int khz_sheet_selftest(void)
 
             /* KhzFormulaNode is public, so evaluator-side shape validation is
                part of the contract. A malformed aggregate must be refused as
-               ERR_FORMAT rather than dereferencing a missing child array. */
+               ERR_FORMAT without dereferencing a missing child array or
+               modifying the caller's result object. */
             {
                 KhzFormula malformed = {0};
                 KhzFormulaNode root = {0};
-                KhzFormulaResult result;
+                KhzFormulaResult result = {
+                    (uint32_t)KHZ_CELL_RATIONAL,
+                    (uint32_t)KHZ_CELL_ERROR_NONE,
+                    { (int64_t)77, (int64_t)11 }
+                };
 
                 malformed.arena = &sheet.arena;
                 malformed.root = &root;
@@ -189,7 +194,11 @@ int khz_sheet_selftest(void)
                 root.child_count = 1u;
                 root.children = NULL;
 
-                if (khz_formula_eval(&sheet, &malformed, &result) != KHZ_SHEET_ERR_FORMAT) {
+                if (khz_formula_eval(&sheet, &malformed, &result) != KHZ_SHEET_ERR_FORMAT
+                    || result.kind != (uint32_t)KHZ_CELL_RATIONAL
+                    || result.error != (uint32_t)KHZ_CELL_ERROR_NONE
+                    || result.value.num != (int64_t)77
+                    || result.value.den != (int64_t)11) {
                     ++local;
                 }
             }
