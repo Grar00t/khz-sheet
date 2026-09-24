@@ -11,6 +11,7 @@
 
 #include "khz_sheet.h"
 
+#include "khz_formula.h"
 #include "khz_hash.h"
 #include "khz_simd.h"
 
@@ -172,6 +173,25 @@ int khz_sheet_selftest(void)
                 || mean.num != (int64_t)3 || mean.den != (int64_t)2
                 || counted != (size_t)2) {
                 ++local;
+            }
+
+            /* KhzFormulaNode is public, so evaluator-side shape validation is
+               part of the contract. A malformed aggregate must be refused as
+               ERR_FORMAT rather than dereferencing a missing child array. */
+            {
+                KhzFormula malformed = {0};
+                KhzFormulaNode root = {0};
+                KhzFormulaResult result;
+
+                malformed.arena = &sheet.arena;
+                malformed.root = &root;
+                root.op = (uint32_t)KHZ_FORMULA_SUM;
+                root.child_count = 1u;
+                root.children = NULL;
+
+                if (khz_formula_eval(&sheet, &malformed, &result) != KHZ_SHEET_ERR_FORMAT) {
+                    ++local;
+                }
             }
 
             if (khz_sheet_verify_chain(&sheet, NULL) != KHZ_SHEET_OK) {
