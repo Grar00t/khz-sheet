@@ -749,6 +749,9 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
 KhzSheetStatus khz_formula_eval(KhzSheet *sheet, const KhzFormula *formula,
                                 KhzFormulaResult *out)
 {
+    KhzFormulaResult result;
+    KhzSheetStatus status;
+
     if (sheet == NULL || formula == NULL || out == NULL) {
         return KHZ_SHEET_ERR_NULL;
     }
@@ -756,9 +759,14 @@ KhzSheetStatus khz_formula_eval(KhzSheet *sheet, const KhzFormula *formula,
         return KHZ_SHEET_ERR_STATE;
     }
 
-    memset(out, 0, sizeof *out);
+    memset(&result, 0, sizeof result);
+    status = khz_eval_node(sheet, formula->root, (size_t)0, &result);
+    if (status != KHZ_SHEET_OK) {
+        return status;
+    }
 
-    return khz_eval_node(sheet, formula->root, (size_t)0, out);
+    *out = result;
+    return KHZ_SHEET_OK;
 }
 
 KhzSheetStatus khz_formula_eval_strict(KhzSheet *sheet, const KhzFormula *formula,
