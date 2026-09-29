@@ -11,6 +11,9 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 - Single-cell semantic Undo/Redo through the normal native commit path.
 - Case-insensitive Find Next over stored cell inputs/formula source.
 - Toggle freeze of the first data column.
+- Desktop cell formatting: installed font families, preset sizes, bold/italic, text/fill colors, alignment and borders.
+- Visual table styling for a rectangular selection with header and row banding; this is not a semantic Excel/Sheets table.
+- Undo/Redo includes cell-format and visual-table-style actions.
 
 ## High-value gaps
 - XLSX open in the desktop: native reader exists, but no managed reader binding currently exposes it safely.
@@ -18,9 +21,9 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 - Sort/filter: absent. A naive DataView sort would break visual-row to native-coordinate identity, so it must not be enabled without a coordinate-preserving view model.
 - Row/column insert, delete, hide, group and resize persistence.
 - Sheet rename/reorder/delete and workbook-level file format.
-- Formatting: number formats, fonts, fills, borders, alignment, wrapping and merge.
+- Formatting gaps: number formats, underline/strikethrough, wrapping, merge, conditional formatting, persisted row heights/column widths, and style import/export. Current presentation formatting is session-only.
 - Data validation/drop-downs and conditional formatting.
-- Tables, charts, pivots, comments/notes and hyperlinks.
+- Semantic tables (structured references, filter/sort/totals), charts, pivots, comments/notes and hyperlinks.
 - Broader formula families: logical, lookup/reference, text, date/time, statistical and array functions.
 - Print/page layout, import/export fidelity and general Excel workbook compatibility.
 - Autosave, version history, collaboration, protected ranges and sharing are not local-engine features today.

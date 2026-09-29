@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
 
@@ -12,10 +13,17 @@ public partial class MainWindow : Window
 {
     private readonly WorkbookSession _workbook = new();
     private bool _rebinding;
+    private bool _formatControlReady;
+
+    private sealed record ColorChoice(string Name, string? Hex);
 
     public MainWindow()
     {
         InitializeComponent();
+        EventManager.RegisterClassHandler(
+            typeof(DataGridCell), FrameworkElement.LoadedEvent,
+            new RoutedEventHandler(DataGridCell_Loaded));
+        InitializeFormattingControls();
 
         SheetList.ItemsSource = _workbook.Sheets;
         SheetList.SelectedIndex = 0;
@@ -29,6 +37,33 @@ public partial class MainWindow : Window
     }
 
     private WorksheetSession? CurrentSheet => SheetList.SelectedItem as WorksheetSession;
+
+    private void InitializeFormattingControls()
+    {
+        FontFamilyBox.ItemsSource = Fonts.SystemFontFamilies
+            .Select(x => x.Source)
+            .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+        FontFamilyBox.SelectedItem = "Segoe UI";
+        FontSizeBox.ItemsSource = new double[] { 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72 };
+        FontSizeBox.SelectedItem = 11d;
+
+        ColorChoice[] textColors =
+        [
+            new("Text · default", null), new("White", "#FFFFFF"), new("Black", "#000000"),
+            new("Green", "#3FB950"), new("Blue", "#58A6FF"), new("Red", "#FF7B72"),
+            new("Orange", "#D29922"), new("Purple", "#BC8CFF")
+        ];
+        ColorChoice[] fills =
+        [
+            new("Fill · none", null), new("Slate", "#1F2630"), new("Blue", "#163A5F"),
+            new("Green", "#123C2B"), new("Red", "#4A1F24"), new("Gold", "#493B12"),
+            new("Purple", "#36244A"), new("White", "#FFFFFF")
+        ];
+        TextColorBox.ItemsSource = textColors; TextColorBox.DisplayMemberPath = nameof(ColorChoice.Name); TextColorBox.SelectedIndex = 0;
+        FillColorBox.ItemsSource = fills; FillColorBox.DisplayMemberPath = nameof(ColorChoice.Name); FillColorBox.SelectedIndex = 0;
+        _formatControlReady = true;
+    }
 
     private void BindSheet(WorksheetSession sheet)
     {
@@ -231,6 +266,37 @@ public partial class MainWindow : Window
 
     private void FindNext_Click(object sender, RoutedEventArgs e) => FindNextInput();
 
+    private void FontFamilyBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_formatControlReady && FontFamilyBox.SelectedItem is string font)
+            ApplySelectedFormat(new CellFormat(FontFamily: font));
+    }
+
+    private void FontSizeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_formatControlReady && FontSizeBox.SelectedItem is double size)
+            ApplySelectedFormat(new CellFormat(FontSize: size));
+    }
+
+    private void TextColorBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_formatControlReady && TextColorBox.SelectedItem is ColorChoice { Hex: not null } color)
+            ApplySelectedFormat(new CellFormat(Foreground: color.Hex));
+    }
+
+    private void FillColorBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_formatControlReady && FillColorBox.SelectedItem is ColorChoice { Hex: not null } color)
+            ApplySelectedFormat(new CellFormat(Background: color.Hex));
+    }
+
+    private void Bold_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Bold: true));
+    private void Italic_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Italic: true));
+    private void AlignLeft_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Alignment: CellTextAlignment.Left));
+    private void AlignCenter_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Alignment: CellTextAlignment.Center));
+    private void AlignRight_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Alignment: CellTextAlignment.Right));
+    private void Borders_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Border: "#59636E", BorderThickness: 1.0));
+
     private void ApplyFormula_Click(object sender, RoutedEventArgs e)
     {
         CommitFormulaBar();
@@ -288,6 +354,7 @@ public partial class MainWindow : Window
         }
 
         UpdateFormulaBar();
+        RefreshRealizedCellStyles();
     }
 
     private void UpdateFormulaBar()
@@ -466,13 +533,109 @@ public partial class MainWindow : Window
         UpdateFormulaBar();
     }
 
+    private List<(int Row, int Column)> SelectedCoordinates()
+    {
+        List<(int Row, int Column)> cells = new();
+        WorksheetSession? sheet = CurrentSheet;
+        if (sheet is null) return cells;
+
+        foreach (DataGridCellInfo cell in SheetGrid.SelectedCells)
+        {
+            if (cell.Item is not DataRowView rowView || cell.Column is null) continue;
+            int row = sheet.Grid.Rows.IndexOf(rowView.Row);
+            int column = cell.Column.DisplayIndex;
+            if (row >= 0 && column >= 0) cells.Add((row, column));
+        }
+
+        if (cells.Count == 0 && TryCurrentCoordinate(out int currentRow, out int currentColumn))
+            cells.Add((currentRow, currentColumn));
+        return cells.Distinct().ToList();
+    }
+
+    private void ApplySelectedFormat(CellFormat format)
+    {
+        WorksheetSession? sheet = CurrentSheet;
+        List<(int Row, int Column)> cells = SelectedCoordinates();
+        if (sheet is null || cells.Count == 0) { SetStatus("select one or more cells"); return; }
+        sheet.ApplyFormat(cells, format, out string message);
+        RefreshCellStyles(sheet);
+        SetStatus(message);
+    }
+
+    private void ClearFormat_Click(object sender, RoutedEventArgs e)
+    {
+        WorksheetSession? sheet = CurrentSheet;
+        List<(int Row, int Column)> cells = SelectedCoordinates();
+        if (sheet is null || cells.Count == 0) { SetStatus("select one or more cells"); return; }
+        sheet.ClearFormat(cells, out string message);
+        RefreshCellStyles(sheet);
+        SetStatus(message);
+    }
+
+    private void TableStyle_Click(object sender, RoutedEventArgs e)
+    {
+        WorksheetSession? sheet = CurrentSheet;
+        List<(int Row, int Column)> cells = SelectedCoordinates();
+        if (sheet is null || cells.Count == 0) { SetStatus("select a rectangular range"); return; }
+
+        int minRow = cells.Min(x => x.Row), maxRow = cells.Max(x => x.Row);
+        int minColumn = cells.Min(x => x.Column), maxColumn = cells.Max(x => x.Column);
+        int expected = (maxRow - minRow + 1) * (maxColumn - minColumn + 1);
+        if (cells.Count != expected)
+        {
+            SetStatus("table style requires one rectangular selection");
+            return;
+        }
+
+        sheet.ApplyTableFormat(new CellRange(minRow, minColumn, maxRow, maxColumn), out string message);
+        RefreshCellStyles(sheet);
+        SetStatus(message);
+    }
+
+    private void RefreshCellStyles(WorksheetSession sheet)
+    {
+        SheetGrid.Items.Refresh();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(RefreshRealizedCellStyles));
+    }
+
+    private void RefreshRealizedCellStyles()
+    {
+        foreach (DataGridCell cell in FindVisualChildren<DataGridCell>(SheetGrid))
+            ApplyCellVisualFormat(cell);
+    }
+
+    private void DataGridCell_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is DataGridCell cell) ApplyCellVisualFormat(cell);
+    }
+
+    private void ApplyCellVisualFormat(DataGridCell cell)
+    {
+        WorksheetSession? sheet = CurrentSheet;
+        if (sheet is null || cell.DataContext is not DataRowView rowView || cell.Column is null) return;
+        int row = sheet.Grid.Rows.IndexOf(rowView.Row);
+        int column = cell.Column.DisplayIndex;
+        if (row < 0 || column < 0) return;
+        CellVisualFormat.Apply(cell, sheet.GetEffectiveFormat(row, column));
+    }
+
+    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) yield return match;
+            foreach (T nested in FindVisualChildren<T>(child)) yield return nested;
+        }
+    }
+
     private void UndoCurrentSheet()
     {
         WorksheetSession? sheet = CurrentSheet;
         if (sheet is null) return;
         sheet.Undo(out string message);
         SetStatus(message);
-        SheetGrid.Items.Refresh();
+        RefreshCellStyles(sheet);
         UpdateFormulaBar();
         RefreshEngineText();
     }
@@ -483,7 +646,7 @@ public partial class MainWindow : Window
         if (sheet is null) return;
         sheet.Redo(out string message);
         SetStatus(message);
-        SheetGrid.Items.Refresh();
+        RefreshCellStyles(sheet);
         UpdateFormulaBar();
         RefreshEngineText();
     }
