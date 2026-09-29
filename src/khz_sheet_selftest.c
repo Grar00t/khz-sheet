@@ -201,6 +201,25 @@ int khz_sheet_selftest(void)
                     || result.value.den != (int64_t)11) {
                     ++local;
                 }
+
+                {
+                    uint64_t declared = (uint64_t)99;
+                    KhzFormulaNode *children[1] = { NULL };
+
+                    if (khz_formula_declare_dependencies(&sheet, &malformed, &declared)
+                            != KHZ_SHEET_ERR_FORMAT
+                        || declared != (uint64_t)0) {
+                        ++local;
+                    }
+
+                    root.children = children;
+                    declared = (uint64_t)99;
+                    if (khz_formula_declare_dependencies(&sheet, &malformed, &declared)
+                            != KHZ_SHEET_ERR_FORMAT
+                        || declared != (uint64_t)0) {
+                        ++local;
+                    }
+                }
             }
 
             if (khz_sheet_verify_chain(&sheet, NULL) != KHZ_SHEET_OK) {

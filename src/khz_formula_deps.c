@@ -179,7 +179,7 @@ static KhzSheetStatus khz_declare_walk(KhzSheet *sheet, const KhzFormulaNode *no
         || node->child_count > KHZ_FORMULA_MAX_ARGS) {
         return KHZ_SHEET_ERR_LIMIT;
     }
-    if (node->child_count != 0 && node->children == NULL) return KHZ_SHEET_ERR_NULL;
+    if (node->child_count != 0u && node->children == NULL) return KHZ_SHEET_ERR_FORMAT;
 
     if (node->op == (uint32_t)KHZ_FORMULA_REF) {
         status = khz_sheet_declare_dependency(sheet, node->col0, node->row0, col, row);
@@ -203,7 +203,9 @@ static KhzSheetStatus khz_declare_walk(KhzSheet *sheet, const KhzFormulaNode *no
     }
 
     for (i = 0u; i < node->child_count; ++i) {
-        status = khz_declare_walk(sheet, node->children[i], col, row,
+        const KhzFormulaNode *child = node->children[i];
+        if (child == NULL) return KHZ_SHEET_ERR_FORMAT;
+        status = khz_declare_walk(sheet, child, col, row,
                                   depth + (size_t)1, declared, visited);
         if (status != KHZ_SHEET_OK) {
             return status;
