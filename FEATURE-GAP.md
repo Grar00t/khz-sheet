@@ -21,6 +21,7 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 - Find/Replace: Find Next exists; replacement UI and grouped Replace All history are absent.
 - Sort/filter: absent. A naive DataView sort would break visual-row to native-coordinate identity, so it must not be enabled without a coordinate-preserving view model.
 - Row/column insert, delete, hide, group and resize persistence.
+- Long-lived native edit churn: failed formula transactions rewind their arena bytes, but retired allocations from successful text/formula replacements remain reserved until the sheet is destroyed; there is no compaction/GC path yet.
 - Sheet rename/reorder/delete and workbook-level file format.
 - Formatting gaps: strikethrough, merge, conditional formatting, persisted row heights/column widths, and style import on XLSX open. Exported styles are currently limited to the implemented font/fill/border/alignment/wrap/built-in-number-format subset.
 - Data validation/drop-downs and conditional formatting.

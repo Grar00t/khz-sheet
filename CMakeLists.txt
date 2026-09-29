@@ -252,6 +252,10 @@ if(KHZ_BUILD_TESTS)
     add_executable(khz_formula_transaction_test tests/khz_formula_transaction_test.c)
     target_link_libraries(khz_formula_transaction_test PRIVATE khz_sheet)
     add_test(NAME khz_formula_transaction_test COMMAND khz_formula_transaction_test)
+
+    add_executable(khz_dependency_retry_test tests/khz_dependency_retry_test.c)
+    target_link_libraries(khz_dependency_retry_test PRIVATE khz_sheet)
+    add_test(NAME khz_dependency_retry_test COMMAND khz_dependency_retry_test)
 endif()
 
 if(KHZ_BUILD_TESTS)

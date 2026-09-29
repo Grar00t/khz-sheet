@@ -1,5 +1,5 @@
 # Testing
-CTest builds native failure, proof-tamper, XLSX writer/reader, malformed ZIP, ledger and self-test executables. Five added C executables cover formula boundaries, numeric boundaries/properties, formula rollback, ZIP framing, and randomized incremental recalculation.
+CTest builds native failure, proof-tamper, XLSX writer/reader, malformed ZIP, ledger and self-test executables. Native regressions cover formula boundaries, numeric boundaries/properties, formula rollback, range-edge retry/idempotence after a deterministic mid-scan failure, ZIP framing, and randomized incremental recalculation.
 The Fraction oracle is registered when Python and a shared library are built without ASAN. ASAN builds run the native numeric property test instead; loading an ASAN library into an ordinary Python process is not treated as a valid sanitizer invocation.
 Run `ctest --test-dir build/release --output-on-failure`. For verbose assertion counts, add `-V`. `--repeat until-fail:3` checks repeat execution, not exhaustive coverage.
 Windows managed integration: after `build-desktop.ps1`, prepend `build/desktop-native/Release` to PATH and run each project under `tests/dotnet` with `dotnet run --project <project.csproj> -c Release`.
