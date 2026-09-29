@@ -10,6 +10,20 @@ static int khz_deps_result_is_error(const KhzFormulaResult *r)
     return r->kind == (uint32_t)KHZ_CELL_ERROR;
 }
 
+static int khz_formula_parse_fault_is_cell_value(KhzSheetStatus status)
+{
+    return status == KHZ_SHEET_ERR_MISSING || status == KHZ_SHEET_ERR_FORMAT
+        || status == KHZ_SHEET_ERR_OVERFLOW || status == KHZ_SHEET_ERR_RANGE;
+}
+
+static KhzCellError khz_formula_parse_fault_error(KhzSheetStatus status)
+{
+    if (status == KHZ_SHEET_ERR_MISSING) return KHZ_CELL_ERROR_NAME;
+    if (status == KHZ_SHEET_ERR_OVERFLOW || status == KHZ_SHEET_ERR_RANGE) {
+        return KHZ_CELL_ERROR_NUM;
+    }
+    return KHZ_CELL_ERROR_VALUE;
+}
 /* Formula dependency replacement is transactional without changing the public
    graph layout. A formula tree is parsed first; dep_mark is then taken before
    any new edge or range is declared. Because the arena is monotonic, graph
@@ -510,10 +524,27 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         status = khz_formula_parse(&formula, arena, cell->col, cell->row,
                                    cell->formula, (size_t)cell->formula_len, NULL);
         if (status != KHZ_SHEET_OK) {
-            (void)khz_arena_release(arena, mark);
-            return status;
-        }
+            KhzCell previous_parse = *cell;
 
+            if (!khz_formula_parse_fault_is_cell_value(status)) {
+                (void)khz_arena_release(arena, mark);
+                return status;
+            }
+
+            cell->value = khz_rational_zero();
+            cell->error = (uint32_t)khz_formula_parse_fault_error(status);
+            cell->flags &= ~(uint32_t)KHZ_CELL_FLAG_DIRTY;
+            status = khz_sheet_commit_in_place(sheet, cell);
+            if (status != KHZ_SHEET_OK) {
+                *cell = previous_parse;
+                (void)khz_arena_release(arena, mark);
+                return status;
+            }
+
+            khz_dirty_dependents(sheet, order[i]);
+            ++done;
+            continue;
+        }
         status = khz_formula_eval(sheet, &formula, &result);
         khz_formula_abandon(&formula);
 
