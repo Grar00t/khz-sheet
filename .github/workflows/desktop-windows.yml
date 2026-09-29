@@ -62,3 +62,4 @@ jobs:
           dotnet run --project tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release
           dotnet run --project tests/dotnet/KhzDependencyRewrite/KhzDependencyRewrite.csproj -c Release
           dotnet run --project tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj -c Release
+          dotnet run --project tests/dotnet/KhzDesktopContracts/KhzDesktopContracts.csproj -c Release

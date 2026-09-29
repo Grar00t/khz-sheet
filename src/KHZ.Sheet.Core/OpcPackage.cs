@@ -172,9 +172,26 @@ namespace KHZ.Sheet.Core
 		}
 
 		/// <summary>
-		/// Replaces one part's bytes, keeping its position. This is the only
-		/// mutation: a caller that understands a specific part rewrites that part
-		/// and nothing else. Adding and removing parts is not supported here.
+		/// Adds a new non-empty part at the end of the package. Existing parts
+		/// are never replaced implicitly; callers must use TryReplacePart when
+		/// changing a known part.
+		/// </summary>
+		public SheetStatus TryAddPart(string partName, byte[] content)
+		{
+			if (_disposed) return SheetStatus.ErrRange;
+			if (partName is null || content is null) return SheetStatus.ErrNull;
+			if (partName.Length == 0 || partName.EndsWith("/", StringComparison.Ordinal)
+				|| content.Length == 0) return SheetStatus.ErrFormat;
+			if (_parts.ContainsKey(partName)) return SheetStatus.ErrState;
+
+			_parts.Add(partName, (byte[])content.Clone());
+			_order.Add(partName);
+			return SheetStatus.Ok;
+		}
+
+		/// <summary>
+		/// Replaces one part's bytes, keeping its position. A caller that
+		/// understands a specific part rewrites that part and nothing else.
 		/// </summary>
 		public SheetStatus TryReplacePart(string partName, byte[] content)
 		{
