@@ -268,13 +268,14 @@ KhzSheetStatus khz_formula_eval_strict(struct KhzSheet *sheet,
                                        const KhzFormula *formula,
                                        KhzRational *out);
 
-/* Declares an edge into the dependency graph for every cell the formula reads.
-   A RANGE contributes one edge per cell in the rectangle, so the topological
-   order is correct rather than approximately correct. *declared receives the
-   edge count and may be NULL. */
+/* Declares dependencies for every cell or region the formula reads. A REF is
+   one concrete edge. A RANGE is retained as a declared region and materialised
+   into concrete edges for cells that currently exist; later cells entering the
+   region are linked by range sync. *declared is the number of logical REF/RANGE
+   declarations and may be NULL. */
 KhzSheetStatus khz_formula_declare_dependencies(struct KhzSheet *sheet,
                                                 const KhzFormula *formula,
-                                                size_t *declared);
+                                                uint64_t *declared);
 
 /* Parse, store the source on the cell through khz_sheet_set_formula, and
    declare dependencies, as one operation. Nothing is committed if any step
@@ -291,7 +292,7 @@ KhzSheetStatus khz_formula_set(struct KhzSheet *sheet, uint32_t col, uint32_t ro
    cycle is reported, never broken at an arbitrary edge to force progress.
 
    *evaluated receives the number of formula cells recomputed and may be NULL. */
-KhzSheetStatus khz_formula_recalc(struct KhzSheet *sheet, size_t *evaluated);
+KhzSheetStatus khz_formula_recalc(struct KhzSheet *sheet, uint64_t *evaluated);
 
 const char *khz_formula_op_name(KhzFormulaOp op);
 
