@@ -7,6 +7,7 @@
         MinWidth="1000"
         MinHeight="650"
         Icon="Assets/khz-sheet.ico"
+        PreviewKeyDown="MainWindow_PreviewKeyDown"
         WindowStartupLocation="CenterScreen">
     <Grid>
         <Grid.RowDefinitions>
@@ -69,6 +70,13 @@
                 <Button Content="Open CSV" Click="OpenCsv_Click"/>
                 <Button Content="Save CSV" Click="SaveCsv_Click"/>
                 <Button Content="Export XLSX" Click="ExportXlsx_Click"/>
+                <Separator Width="12" Opacity="0"/>
+                <Button Content="Undo" Click="Undo_Click" ToolTip="Ctrl+Z"/>
+                <Button Content="Redo" Click="Redo_Click" ToolTip="Ctrl+Y"/>
+                <Button Content="Freeze A" Click="FreezeFirstColumn_Click"/>
+                <Separator Width="12" Opacity="0"/>
+                <TextBox x:Name="FindBox" Width="170" Margin="0,0,6,0" ToolTip="Find in cell inputs · Ctrl+F"/>
+                <Button Content="Find Next" Click="FindNext_Click"/>
                 <Separator Width="12" Opacity="0"/>
                 <Button Content="Recalculate" Click="Recalculate_Click"/>
                 <Button Content="Verify Proof" Click="Verify_Click" Style="{StaticResource AccentButton}"/>

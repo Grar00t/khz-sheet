@@ -142,6 +142,19 @@ public sealed class WorksheetSession : IDisposable
 
     public bool CommitCell(int row, int column, string? input, out string message)
     {
+        string before = GetInput(row, column);
+        string after = input ?? string.Empty;
+        bool ok = CommitCellCore(row, column, after, out message);
+        if (ok && !string.Equals(before, after, StringComparison.Ordinal))
+        {
+            _undo.Push(new CellEdit(row, column, before, after));
+            _redo.Clear();
+        }
+        return ok;
+    }
+
+    private bool CommitCellCore(int row, int column, string raw, out string message)
+    {
         message = string.Empty;
 
         if (!InBounds(row, column))
@@ -150,7 +163,6 @@ public sealed class WorksheetSession : IDisposable
             return false;
         }
 
-        string raw = input ?? string.Empty;
         _inputs[Key(row, column)] = raw;
 
         if (!EngineAvailable)
@@ -205,6 +217,73 @@ public sealed class WorksheetSession : IDisposable
             ? EngineSummary
             : $"recalculated {evaluated:N0} · {EngineSummary}";
         return true;
+    }
+
+    public bool Undo(out string message)
+    {
+        if (_undo.Count == 0)
+        {
+            message = "nothing to undo";
+            return false;
+        }
+
+        CellEdit edit = _undo.Pop();
+        if (!CommitCellCore(edit.Row, edit.Column, edit.Before, out message))
+        {
+            _undo.Push(edit);
+            return false;
+        }
+
+        _redo.Push(edit);
+        message = $"undo · {ColumnName(edit.Column)}{edit.Row + 1}";
+        return true;
+    }
+
+    public bool Redo(out string message)
+    {
+        if (_redo.Count == 0)
+        {
+            message = "nothing to redo";
+            return false;
+        }
+
+        CellEdit edit = _redo.Pop();
+        if (!CommitCellCore(edit.Row, edit.Column, edit.After, out message))
+        {
+            _redo.Push(edit);
+            return false;
+        }
+
+        _undo.Push(edit);
+        message = $"redo · {ColumnName(edit.Column)}{edit.Row + 1}";
+        return true;
+    }
+
+    public bool TryFindInput(string query, int startRow, int startColumn, out int row, out int column)
+    {
+        row = -1;
+        column = -1;
+        if (string.IsNullOrEmpty(query)) return false;
+
+        int columns = Grid.Columns.Count;
+        int total = Grid.Rows.Count * columns;
+        int start = startRow >= 0 && startColumn >= 0
+            ? ((startRow * columns + startColumn + 1) % total)
+            : 0;
+
+        for (int offset = 0; offset < total; offset++)
+        {
+            int index = (start + offset) % total;
+            int r = index / columns;
+            int c = index % columns;
+            if (GetInput(r, c).Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                row = r;
+                column = c;
+                return true;
+            }
+        }
+        return false;
     }
 
     public bool Recalculate(out string message)

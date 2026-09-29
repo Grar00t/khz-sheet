@@ -218,6 +218,19 @@ public partial class MainWindow : Window
         }
     }
 
+    private void Undo_Click(object sender, RoutedEventArgs e) => UndoCurrentSheet();
+
+    private void Redo_Click(object sender, RoutedEventArgs e) => RedoCurrentSheet();
+
+    private void FreezeFirstColumn_Click(object sender, RoutedEventArgs e)
+    {
+        if (SheetGrid.Columns.Count == 0) return;
+        SheetGrid.FrozenColumnCount = SheetGrid.FrozenColumnCount == 0 ? 1 : 0;
+        SetStatus(SheetGrid.FrozenColumnCount == 0 ? "column A unfrozen" : "column A frozen");
+    }
+
+    private void FindNext_Click(object sender, RoutedEventArgs e) => FindNextInput();
+
     private void ApplyFormula_Click(object sender, RoutedEventArgs e)
     {
         CommitFormulaBar();
@@ -322,6 +335,35 @@ public partial class MainWindow : Window
             }));
     }
 
+    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.F)
+        {
+            e.Handled = true;
+            FindBox.Focus();
+            FindBox.SelectAll();
+            return;
+        }
+
+        if (Keyboard.FocusedElement is TextBox)
+        {
+            return;
+        }
+
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z)
+        {
+            e.Handled = true;
+            UndoCurrentSheet();
+            return;
+        }
+
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Y)
+        {
+            e.Handled = true;
+            RedoCurrentSheet();
+        }
+    }
+
     private void SheetGrid_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.V)
@@ -422,6 +464,57 @@ public partial class MainWindow : Window
         RefreshEngineText();
         SheetGrid.Items.Refresh();
         UpdateFormulaBar();
+    }
+
+    private void UndoCurrentSheet()
+    {
+        WorksheetSession? sheet = CurrentSheet;
+        if (sheet is null) return;
+        sheet.Undo(out string message);
+        SetStatus(message);
+        SheetGrid.Items.Refresh();
+        UpdateFormulaBar();
+        RefreshEngineText();
+    }
+
+    private void RedoCurrentSheet()
+    {
+        WorksheetSession? sheet = CurrentSheet;
+        if (sheet is null) return;
+        sheet.Redo(out string message);
+        SetStatus(message);
+        SheetGrid.Items.Refresh();
+        UpdateFormulaBar();
+        RefreshEngineText();
+    }
+
+    private void FindNextInput()
+    {
+        WorksheetSession? sheet = CurrentSheet;
+        string query = FindBox.Text;
+        if (sheet is null || string.IsNullOrEmpty(query))
+        {
+            SetStatus("enter text to find");
+            return;
+        }
+
+        int startRow = -1;
+        int startColumn = -1;
+        TryCurrentCoordinate(out startRow, out startColumn);
+        if (!sheet.TryFindInput(query, startRow, startColumn, out int row, out int column))
+        {
+            SetStatus($"not found · {query}");
+            return;
+        }
+
+        DataRowView item = sheet.Grid.DefaultView[row];
+        SheetGrid.SelectedCells.Clear();
+        SheetGrid.CurrentCell = new DataGridCellInfo(item, SheetGrid.Columns[column]);
+        SheetGrid.SelectedCells.Add(SheetGrid.CurrentCell);
+        SheetGrid.ScrollIntoView(item, SheetGrid.Columns[column]);
+        NameBox.Text = CellName(row, column);
+        FormulaBox.Text = sheet.GetInput(row, column);
+        SetStatus($"found · {CellName(row, column)}");
     }
 
     private void SheetList_SelectionChanged(object sender, SelectionChangedEventArgs e)
