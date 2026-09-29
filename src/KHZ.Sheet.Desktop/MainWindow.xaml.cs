@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private bool _formatControlReady;
 
     private sealed record ColorChoice(string Name, string? Hex);
+    private sealed record NumberFormatChoice(string Name, CellNumberFormat Format);
 
     public MainWindow()
     {
@@ -44,9 +45,23 @@ public partial class MainWindow : Window
             .Select(x => x.Source)
             .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
-        FontFamilyBox.SelectedItem = "Segoe UI";
+        FontFamilyBox.SelectedItem = CellFormatDefaults.FontFamily;
         FontSizeBox.ItemsSource = new double[] { 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72 };
-        FontSizeBox.SelectedItem = 11d;
+        FontSizeBox.SelectedItem = CellFormatDefaults.FontSize;
+
+        NumberFormatChoice[] numberFormats =
+        [
+            new("General", CellNumberFormat.General),
+            new("0", CellNumberFormat.Integer),
+            new("0.00", CellNumberFormat.Decimal2),
+            new("#,##0", CellNumberFormat.Thousands),
+            new("#,##0.00", CellNumberFormat.Thousands2),
+            new("0%", CellNumberFormat.Percent),
+            new("0.00%", CellNumberFormat.Percent2)
+        ];
+        NumberFormatBox.ItemsSource = numberFormats;
+        NumberFormatBox.DisplayMemberPath = nameof(NumberFormatChoice.Name);
+        NumberFormatBox.SelectedIndex = 0;
 
         ColorChoice[] textColors =
         [
@@ -292,6 +307,15 @@ public partial class MainWindow : Window
 
     private void Bold_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Bold: true));
     private void Italic_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Italic: true));
+    private void Underline_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Underline: true));
+    private void Wrap_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(WrapText: true));
+
+    private void NumberFormatBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_formatControlReady && NumberFormatBox.SelectedItem is NumberFormatChoice choice)
+            ApplySelectedFormat(new CellFormat(NumberFormat: choice.Format));
+    }
+
     private void AlignLeft_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Alignment: CellTextAlignment.Left));
     private void AlignCenter_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Alignment: CellTextAlignment.Center));
     private void AlignRight_Click(object sender, RoutedEventArgs e) => ApplySelectedFormat(new CellFormat(Alignment: CellTextAlignment.Right));
@@ -616,7 +640,8 @@ public partial class MainWindow : Window
         int row = sheet.Grid.Rows.IndexOf(rowView.Row);
         int column = cell.Column.DisplayIndex;
         if (row < 0 || column < 0) return;
-        CellVisualFormat.Apply(cell, sheet.GetEffectiveFormat(row, column));
+        string baseText = sheet.Grid.Rows[row][column]?.ToString() ?? string.Empty;
+        CellVisualFormat.Apply(cell, sheet.GetEffectiveFormat(row, column), baseText);
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root) where T : DependencyObject

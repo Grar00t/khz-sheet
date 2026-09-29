@@ -10,7 +10,7 @@ Local-first spreadsheet engine with a C11 native core, exact representable ratio
 | Integrity | ABI-96 cell proofs and optional SQLite metadata ledger | existing tamper tests; not encryption, identity authentication or backup |
 | XLSX | supported native reader/writer subset; bounded ZIP validation | synthetic malformed/round-trip tests; not general Excel compatibility |
 | Managed | P/Invoke and OPC utilities | lifetime/concurrency/malformed-image regressions pass; see ABI.md |
-| Desktop | WPF shell with branding, proof-copy, Undo/Redo, Find Next, freeze, cell typography/colors/alignment/borders and visual table styling | clean build plus managed desktop contract test; see DESKTOP.md and FEATURE-GAP.md |
+| Desktop | WPF shell with branding, proof-copy, Undo/Redo, Find Next, freeze, typography/colors/alignment/borders, underline/wrap, built-in number formats and visual table styling | local rendering + XLSX style serialization contract tests; see DESKTOP.md and FEATURE-GAP.md |
 | Tables/charts/localization | not implemented as requested subsystems | not verified |
 
 ## Build and test

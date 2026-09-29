@@ -328,6 +328,26 @@ public sealed class WorksheetSession : IDisposable
         return true;
     }
 
+    internal IReadOnlyList<CellPresentation> CapturePresentationCells()
+    {
+        HashSet<long> keys = new(_formats.Keys);
+        foreach (TableFormat table in _tableFormats)
+        {
+            for (int row = table.Range.StartRow; row <= table.Range.EndRow; row++)
+            for (int column = table.Range.StartColumn; column <= table.Range.EndColumn; column++)
+                keys.Add(Key(row, column));
+        }
+
+        List<CellPresentation> cells = new(keys.Count);
+        foreach (long key in keys.OrderBy(x => x))
+        {
+            DecodeKey(key, out int row, out int column);
+            CellFormat format = GetEffectiveFormat(row, column);
+            if (!format.IsEmpty) cells.Add(new CellPresentation(row, column, format));
+        }
+        return cells;
+    }
+
     public bool TryFindInput(string query, int startRow, int startColumn, out int row, out int column)
     {
         row = -1;
@@ -455,19 +475,60 @@ public sealed class WorksheetSession : IDisposable
     public bool ExportXlsx(string path, out string message)
     {
         message = string.Empty;
-
         if (!EngineAvailable)
         {
             message = EngineSummary;
             return false;
         }
 
-        SheetStatus status;
-        XlsxReport report;
+        string fullPath;
+        try { fullPath = Path.GetFullPath(path); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            message = ex.Message;
+            return false;
+        }
+
+        string? directory = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrEmpty(directory))
+        {
+            message = SheetStatusText.Name(SheetStatus.ErrRange);
+            return false;
+        }
+
+        string fileName = Path.GetFileName(fullPath);
+        string token = Guid.NewGuid().ToString("N");
+        string nativeTemp = Path.Combine(directory, $".{fileName}.{token}.native.tmp");
+        string styledTemp = Path.Combine(directory, $".{fileName}.{token}.styled.tmp");
 
         try
         {
-            status = _native!.TryWriteXlsx(path, Name, out report);
+            SheetStatus status = _native!.TryWriteXlsx(nativeTemp, Name, out XlsxReport report);
+            if (status != SheetStatus.Ok)
+            {
+                message = SheetStatusText.Name(status);
+                return false;
+            }
+
+            IReadOnlyList<CellPresentation> presentation = CapturePresentationCells();
+            string candidate = nativeTemp;
+            string styleSummary = string.Empty;
+            if (presentation.Count > 0)
+            {
+                if (!XlsxPresentationSerializer.TryApply(
+                    nativeTemp, styledTemp, presentation, out styleSummary))
+                {
+                    message = $"xlsx style export failed · {styleSummary}";
+                    return false;
+                }
+                candidate = styledTemp;
+            }
+
+            File.Move(candidate, fullPath, overwrite: true);
+            long finalBytes = new FileInfo(fullPath).Length;
+            string styled = presentation.Count == 0 ? string.Empty : $" · {styleSummary}";
+            message = $"xlsx · {report.CellsWritten:N0} cells · {finalBytes:N0} bytes · lossy {report.LossyCells:N0}{styled}";
+            return true;
         }
         catch (DllNotFoundException)
         {
@@ -479,15 +540,28 @@ public sealed class WorksheetSession : IDisposable
             message = SheetStatusText.Name(SheetStatus.ErrUnsupported);
             return false;
         }
-
-        if (status != SheetStatus.Ok)
+        catch (IOException ex)
         {
-            message = SheetStatusText.Name(status);
+            message = ex.Message;
             return false;
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            message = ex.Message;
+            return false;
+        }
+        finally
+        {
+            TryDelete(nativeTemp);
+            TryDelete(styledTemp);
+        }
+    }
 
-        message = $"xlsx · {report.CellsWritten:N0} cells · {report.BytesWritten:N0} bytes · lossy {report.LossyCells:N0}";
-        return true;
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     public void SaveCsv(string path)

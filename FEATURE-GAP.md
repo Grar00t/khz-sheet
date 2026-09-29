@@ -11,7 +11,8 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 - Single-cell semantic Undo/Redo through the normal native commit path.
 - Case-insensitive Find Next over stored cell inputs/formula source.
 - Toggle freeze of the first data column.
-- Desktop cell formatting: installed font families, preset sizes, bold/italic, text/fill colors, alignment and borders.
+- Desktop cell formatting: installed font families, preset sizes, bold/italic/underline, text/fill colors, alignment, wrapping, built-in number formats and borders.
+- Explicit formatting and visual table banding serialize to XLSX through `styles.xml` and per-cell style indexes; CSV remains unformatted.
 - Visual table styling for a rectangular selection with header and row banding; this is not a semantic Excel/Sheets table.
 - Undo/Redo includes cell-format and visual-table-style actions.
 
@@ -21,7 +22,7 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 - Sort/filter: absent. A naive DataView sort would break visual-row to native-coordinate identity, so it must not be enabled without a coordinate-preserving view model.
 - Row/column insert, delete, hide, group and resize persistence.
 - Sheet rename/reorder/delete and workbook-level file format.
-- Formatting gaps: number formats, underline/strikethrough, wrapping, merge, conditional formatting, persisted row heights/column widths, and style import/export. Current presentation formatting is session-only.
+- Formatting gaps: strikethrough, merge, conditional formatting, persisted row heights/column widths, and style import on XLSX open. Exported styles are currently limited to the implemented font/fill/border/alignment/wrap/built-in-number-format subset.
 - Data validation/drop-downs and conditional formatting.
 - Semantic tables (structured references, filter/sort/totals), charts, pivots, comments/notes and hyperlinks.
 - Broader formula families: logical, lookup/reference, text, date/time, statistical and array functions.

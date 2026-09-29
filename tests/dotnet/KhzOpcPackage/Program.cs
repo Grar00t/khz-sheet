@@ -120,6 +120,16 @@ namespace KHZ.Sheet.Tests
 				Expect(package.TryOpenPart("xl/workbook.xml", out Stream? owned) == SheetStatus.Ok
 					&& BytesEqual(owned, replacementExpected), "replacement bytes are package-owned");
 
+				byte[] addedStyle = new byte[] { 60, 120, 47, 62 };
+				byte[] addedExpected = new byte[] { 60, 120, 47, 62 };
+				Expect(package.TryAddPart("xl/styles.xml", addedStyle) == SheetStatus.Ok,
+					"add styles part");
+				Expect(package.TryAddPart("xl/styles.xml", addedStyle) == SheetStatus.ErrState,
+					"duplicate add refused");
+				addedStyle[0] = 0;
+				Expect(package.TryOpenPart("xl/styles.xml", out Stream? addedOwned) == SheetStatus.Ok
+					&& BytesEqual(addedOwned, addedExpected), "added bytes are package-owned");
+
 				using MemoryStream saved = new MemoryStream();
 				Expect(package.TrySave(saved) == SheetStatus.Ok, "save package");
 				saved.Position = 0;
@@ -131,7 +141,9 @@ namespace KHZ.Sheet.Tests
 					using (reopened)
 					{
 						Expect(reopened.DroppedEntries.Count == 0, "saved container has no hidden drops");
-						Expect(reopened.PartNames.Count == 4, "part order/count preserved");
+						Expect(reopened.PartNames.Count == 5, "part order/count includes added part");
+						Expect(reopened.TryOpenPart("xl/styles.xml", out Stream? afterAdded) == SheetStatus.Ok
+							&& BytesEqual(afterAdded, addedExpected), "added styles payload preserved");
 						Expect(reopened.TryOpenPart(OpcPackage.ContentTypesPart, out Stream? ct) == SheetStatus.Ok
 							&& BytesEqual(ct, contentTypes), "untouched content-types payload byte-identical");
 						Expect(reopened.TryOpenPart("custom/opaque.bin", out Stream? afterOpaque) == SheetStatus.Ok
