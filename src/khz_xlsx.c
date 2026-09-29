@@ -540,6 +540,7 @@ KhzSheetStatus khz_xlsx_build(const KhzSheet *sheet, KhzArena *scratch,
     uint64_t text_bytes = (uint64_t)0;
     uint32_t current_row = 0u;
     int row_open = 0;
+    int formula_caches_clean = 1;
 
     if (sheet == NULL || scratch == NULL || bytes == NULL || length == NULL) {
         return KHZ_SHEET_ERR_NULL;
@@ -561,6 +562,7 @@ KhzSheetStatus khz_xlsx_build(const KhzSheet *sheet, KhzArena *scratch,
             if (text_bytes > UINT64_MAX - (uint64_t)cell->text_len) return KHZ_SHEET_ERR_OVERFLOW;
             text_bytes += (uint64_t)cell->text_len;
         } else if (cell->kind == (uint32_t)KHZ_CELL_FORMULA) {
+            if ((cell->flags & KHZ_CELL_FLAG_DIRTY) != 0) formula_caches_clean = 0;
             if (formula_bytes > UINT64_MAX - (uint64_t)cell->formula_len) return KHZ_SHEET_ERR_OVERFLOW;
             formula_bytes += (uint64_t)cell->formula_len;
         }
@@ -674,14 +676,40 @@ KhzSheetStatus khz_xlsx_build(const KhzSheet *sheet, KhzArena *scratch,
                 khz_buf_puts(&sheet_xml, "</v>");
                 break;
 
-            case KHZ_CELL_FORMULA:
+            case KHZ_CELL_FORMULA: {
+                int cache = formula_caches_clean;
+                if (cache && cell->error != (uint32_t)KHZ_CELL_ERROR_NONE)
+                    khz_buf_puts(&sheet_xml, " t=\"e\"");
                 khz_buf_puts(&sheet_xml, "><f>");
                 if (cell->formula != NULL && cell->formula_len > 0u) {
-                    khz_buf_put_xml(&sheet_xml, cell->formula, (size_t)cell->formula_len);
+                    size_t start = 0;
+                    while (start < cell->formula_len && (cell->formula[start] == ' '
+                        || cell->formula[start] == '\t' || cell->formula[start] == '\r'
+                        || cell->formula[start] == '\n')) ++start;
+                    if (start < cell->formula_len && cell->formula[start] == '=') ++start;
+                    else start = 0;
+                    khz_buf_put_xml(&sheet_xml, cell->formula + start, (size_t)cell->formula_len - start);
                 }
                 khz_buf_puts(&sheet_xml, "</f>");
+                if (cache) {
+                    khz_buf_puts(&sheet_xml, "<v>");
+                    if (cell->error != (uint32_t)KHZ_CELL_ERROR_NONE)
+                        khz_buf_puts(&sheet_xml, khz_xlsx_error_literal(cell->error));
+                    else if (cell->value.den == 1) khz_buf_put_i64(&sheet_xml, cell->value.num);
+                    else {
+                        double approx; char tmp[64];
+                        status = khz_rational_to_double(cell->value, &approx);
+                        if (status != KHZ_SHEET_OK) return status;
+                        status = khz_format_double(tmp, sizeof tmp, approx);
+                        if (status != KHZ_SHEET_OK) return status;
+                        khz_buf_puts(&sheet_xml, tmp);
+                        ++local.lossy_cells;
+                    }
+                    khz_buf_puts(&sheet_xml, "</v>");
+                }
                 local.formula_cells += (uint64_t)1;
                 break;
+            }
 
             case KHZ_CELL_EMPTY:
             default:
@@ -772,7 +800,10 @@ KhzSheetStatus khz_xlsx_build(const KhzSheet *sheet, KhzArena *scratch,
                  "2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/"
                  "officeDocument/2006/relationships\"><sheets><sheet name=\"");
     khz_buf_put_xml(&book_xml, name, name_len);
-    khz_buf_puts(&book_xml, "\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
+    khz_buf_puts(&book_xml, "\" sheetId=\"1\" r:id=\"rId1\"/></sheets>");
+    if (local.formula_cells != 0)
+        khz_buf_puts(&book_xml, "<calcPr fullCalcOnLoad=\"1\"/>");
+    khz_buf_puts(&book_xml, "</workbook>");
 
     status = khz_buf_init(&book_rels, scratch, (size_t)768);
     if (status != KHZ_SHEET_OK) return status;

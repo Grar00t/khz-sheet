@@ -1,0 +1,7 @@
+# Numeric model
+`KhzRational` has signed 64-bit numerator/denominator, positive denominator, reduced GCD and canonical zero 0/1. Both fields exclude INT64_MIN. Construction of INT64_MIN remains rejected, including inputs reducible only after accepting that excluded raw value.
+Addition/subtraction now reduce wide intermediate results before testing representability. Multiplication/division retain cross-cancellation. Unrepresentable canonical results return ERR_OVERFLOW (-7) without publishing output. No floating-point fallback exists in these operations.
+Integer aggregate sums now use an exact two-limb fallback when a scalar prefix or SIMD lane overflows. `khz_simd_sum_i64` accepts final values in INT64_MIN..INT64_MAX; the rational API still excludes INT64_MIN. Scaled sums reduce by their positive common denominator before the rational range check.
+Generic mixed-denominator sequential aggregates may still reject a nonrepresentable intermediate even when later cancellation would fit. Exact arbitrary-length expression rearrangement is not implemented.
+Validation: `khz_numeric_boundary_test`, `khz_rational_oracle.py`. The independent Python Fraction oracle is development-only. It checks both results and unchanged output on rejected arithmetic.
+XLSX numeric cells are not a lossless rational transport. See XLSX-BOUNDARY.md. Approximate statistics and irrational roots are not implemented.

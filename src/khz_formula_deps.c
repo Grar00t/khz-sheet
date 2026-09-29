@@ -127,9 +127,33 @@ static int khz_formula_target_index(KhzSheet *sheet, uint32_t col, uint32_t row,
     return khz_grid_find(&sheet->grid, col, row, index, NULL) == KHZ_SHEET_OK ? 1 : 0;
 }
 
+/* A failed declaration publishes neither new edges nor previously missing
+   cells. Removing only newly inserted slots cannot interrupt an old probe
+   chain: those slots were empty before the transaction began. */
+static void khz_declaration_rollback(KhzSheet *sheet, uint32_t col, uint32_t row,
+                                      size_t mark, size_t old_count, uint32_t old_flags)
+{
+    size_t target;
+    if (khz_formula_target_index(sheet, col, row, &target)) {
+        khz_dep_prune_target(&sheet->deps, target, mark, 1);
+        if (target < old_count) sheet->grid.cells[target].flags = old_flags;
+    }
+    for (size_t i = 0; i < sheet->grid.slot_count; ++i) {
+        KhzGridSlot *slot = &sheet->grid.slots[i];
+        if (slot->used && slot->index >= old_count) memset(slot, 0, sizeof *slot);
+    }
+    for (size_t i = old_count; i < sheet->grid.cell_count; ++i) {
+        memset(&sheet->grid.cells[i], 0, sizeof sheet->grid.cells[i]);
+        sheet->deps.heads[i] = NULL;
+        sheet->deps.indegree[i] = 0;
+    }
+    sheet->grid.cell_count = old_count;
+    (void)khz_arena_release(&sheet->arena, mark);
+}
+
 static KhzSheetStatus khz_declare_walk(KhzSheet *sheet, const KhzFormulaNode *node,
                                        uint32_t col, uint32_t row,
-                                       size_t depth, uint64_t *declared)
+                                       size_t depth, uint64_t *declared, size_t *visited)
 {
     KhzSheetStatus status;
     uint32_t i;
@@ -137,9 +161,11 @@ static KhzSheetStatus khz_declare_walk(KhzSheet *sheet, const KhzFormulaNode *no
     if (node == NULL) {
         return KHZ_SHEET_ERR_NULL;
     }
-    if (depth > KHZ_FORMULA_MAX_DEPTH) {
+    if (depth > KHZ_FORMULA_MAX_DEPTH || ++*visited > KHZ_FORMULA_MAX_NODES
+        || node->child_count > KHZ_FORMULA_MAX_ARGS) {
         return KHZ_SHEET_ERR_LIMIT;
     }
+    if (node->child_count != 0 && node->children == NULL) return KHZ_SHEET_ERR_NULL;
 
     if (node->op == (uint32_t)KHZ_FORMULA_REF) {
         status = khz_sheet_declare_dependency(sheet, node->col0, node->row0, col, row);
@@ -164,7 +190,7 @@ static KhzSheetStatus khz_declare_walk(KhzSheet *sheet, const KhzFormulaNode *no
 
     for (i = 0u; i < node->child_count; ++i) {
         status = khz_declare_walk(sheet, node->children[i], col, row,
-                                  depth + (size_t)1, declared);
+                                  depth + (size_t)1, declared, visited);
         if (status != KHZ_SHEET_OK) {
             return status;
         }
@@ -179,6 +205,9 @@ KhzSheetStatus khz_formula_declare_dependencies(KhzSheet *sheet,
 {
     uint64_t count = (uint64_t)0;
     KhzSheetStatus status;
+    size_t visited = 0, mark, old_count;
+    uint32_t old_flags = 0;
+    KhzCell *target = NULL;
 
     if (sheet == NULL || formula == NULL) {
         return KHZ_SHEET_ERR_NULL;
@@ -187,9 +216,19 @@ KhzSheetStatus khz_formula_declare_dependencies(KhzSheet *sheet,
         return KHZ_SHEET_ERR_STATE;
     }
 
+    if (declared != NULL) *declared = 0;
+    if (sheet->arena.base == NULL || sheet->deps.heads == NULL) return KHZ_SHEET_ERR_STATE;
+    old_count = sheet->grid.cell_count;
+    mark = khz_arena_mark(&sheet->arena);
+    if (khz_grid_find(&sheet->grid, formula->col, formula->row, NULL, &target) == KHZ_SHEET_OK)
+        old_flags = target->flags;
     status = khz_declare_walk(sheet, formula->root, formula->col, formula->row,
-                              (size_t)0, &count);
+                              (size_t)0, &count, &visited);
 
+    if (status != KHZ_SHEET_OK) {
+        khz_declaration_rollback(sheet, formula->col, formula->row, mark, old_count, old_flags);
+        return status;
+    }
     if (declared != NULL) {
         *declared = count;
     }
@@ -207,6 +246,9 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
     size_t dep_mark;
     size_t target = (size_t)0;
     KhzCell *existing = NULL;
+    KhzCell previous;
+    size_t old_count;
+    uint32_t old_flags = 0;
 
     if (sheet == NULL || source == NULL) {
         return KHZ_SHEET_ERR_NULL;
@@ -228,6 +270,8 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
         return KHZ_SHEET_ERR_OVERFLOW;
     }
 
+    old_count = sheet->grid.cell_count;
+    if (existing != NULL) { previous = *existing; old_flags = existing->flags; }
     status = khz_formula_parse(&formula, arena, col, row, source, len, error);
     if (status != KHZ_SHEET_OK) {
         return status;
@@ -256,25 +300,9 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
         return KHZ_SHEET_OK;
     }
 
-    {
-        KhzCell *current = NULL;
-        int installed = 0;
-
-        if (khz_grid_find(&sheet->grid, col, row, NULL, &current) == KHZ_SHEET_OK &&
-            current->kind == (uint32_t)KHZ_CELL_FORMULA &&
-            current->formula_len == (uint32_t)len &&
-            (len == (size_t)0 || (current->formula != NULL &&
-                                  memcmp(current->formula, source, len) == 0))) {
-            installed = 1;
-        }
-
-        if (installed != 0) {
-            khz_dep_prune_target(&sheet->deps, target, dep_mark, 0);
-        } else {
-            khz_dep_prune_target(&sheet->deps, target, dep_mark, 1);
-            khz_formula_abandon(&formula);
-        }
-    }
+    khz_declaration_rollback(sheet, col, row, dep_mark, old_count, old_flags);
+    if (existing != NULL) *existing = previous;
+    khz_formula_abandon(&formula);
 
     return status;
 }
@@ -459,6 +487,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
     for (i = (size_t)0; i < count; ++i) {
         KhzCell *cell;
+        KhzCell previous;
         KhzFormula formula;
         KhzFormulaResult result;
         int changed;
@@ -493,6 +522,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
             return status;
         }
 
+        previous = *cell;
         changed = khz_value_changed(cell, &result);
 
         if (khz_deps_result_is_error(&result)) {
@@ -513,6 +543,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
         status = khz_sheet_commit_in_place(sheet, cell);
         if (status != KHZ_SHEET_OK) {
+            *cell = previous;
             (void)khz_arena_release(arena, mark);
             return status;
         }

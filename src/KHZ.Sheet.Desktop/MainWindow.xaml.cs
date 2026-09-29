@@ -192,6 +192,32 @@ public partial class MainWindow : Window
         RefreshEngineText();
     }
 
+    private void CopyProof_Click(object sender, RoutedEventArgs e)
+    {
+        WorksheetSession? sheet = CurrentSheet;
+        if (sheet is null)
+        {
+            SetStatus("proof unavailable");
+            return;
+        }
+
+        if (!sheet.TryGetProof(out string proof, out string message))
+        {
+            SetStatus(message);
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(proof);
+            SetStatus($"proof copied · {proof[..Math.Min(16, proof.Length)]}");
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            SetStatus($"clipboard unavailable · {ex.Message}");
+        }
+    }
+
     private void ApplyFormula_Click(object sender, RoutedEventArgs e)
     {
         CommitFormulaBar();

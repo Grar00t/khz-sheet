@@ -77,8 +77,12 @@ public sealed class WorksheetSession : IDisposable
     private static readonly nuint CellCapacity = (nuint)200_000;
 
     private readonly Dictionary<long, string> _inputs = new();
+    private readonly Stack<CellEdit> _undo = new();
+    private readonly Stack<CellEdit> _redo = new();
     private NativeSheet? _native;
     private bool _disposed;
+
+    private readonly record struct CellEdit(int Row, int Column, string Before, string After);
 
     public WorksheetSession(string name)
     {
@@ -247,6 +251,25 @@ public sealed class WorksheetSession : IDisposable
 
         string head = proof.Length > 16 ? proof[..16] : proof;
         message = $"proof verified · {head} · commits {NativeCommits:N0}";
+        return true;
+    }
+
+    public bool TryGetProof(out string proof, out string message)
+    {
+        proof = string.Empty;
+        if (!Verify(out message))
+        {
+            return false;
+        }
+
+        SheetStatus status = _native!.TryProofHex(out proof);
+        if (status != SheetStatus.Ok)
+        {
+            proof = string.Empty;
+            message = SheetStatusText.Name(status);
+            return false;
+        }
+
         return true;
     }
 

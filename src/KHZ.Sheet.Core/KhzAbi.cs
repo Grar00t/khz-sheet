@@ -101,6 +101,7 @@ namespace KHZ.Sheet.Core
 		private const uint ExpectedCellProofOffset = 72u;
 		private const uint ExpectedCellValueOffset = 16u;
 
+		private static readonly object VerifyLock = new object();
 		private static bool _verified;
 		private static SheetStatus _result = SheetStatus.ErrState;
 		private static string _detail = "not checked";
@@ -114,6 +115,8 @@ namespace KHZ.Sheet.Core
 		/// </summary>
 		public static SheetStatus Verify(out string detail)
 		{
+			lock (VerifyLock)
+			{
 			if (_verified)
 			{
 				detail = _detail;
@@ -162,6 +165,13 @@ namespace KHZ.Sheet.Core
 			{
 				_result = SheetStatus.ErrUnsupported;
 				_detail = "native library is present but predates the Phase 91 ABI";
+				detail = _detail;
+				return _result;
+			}
+			catch (BadImageFormatException)
+			{
+				_result = SheetStatus.ErrUnsupported;
+				_detail = "native library image is invalid or has the wrong architecture";
 				detail = _detail;
 				return _result;
 			}
@@ -250,6 +260,7 @@ namespace KHZ.Sheet.Core
 			_detail = "ok, native ABI " + sizes.Version.ToString() + rangeDetail;
 			detail = _detail;
 			return _result;
+			}
 		}
 
 		/// <summary>

@@ -1,92 +1,27 @@
 # KHZ Sheet
+Local-first spreadsheet engine with a C11 native core, exact representable rational arithmetic, native formula evaluation/dependencies, predecessor-linked SHA-256 cell proofs, optional system SQLite ledger, narrow XLSX support, .NET 8 P/Invoke bindings and a Windows WPF client.
 
-Local-first spreadsheet engine with a C11 native core, .NET 8 bindings, and a WPF desktop shell.
+## Implemented boundaries
+| Layer | Implementation | Verification boundary |
+|---|---|---|
+| Arithmetic | canonical int64 rational operations; private wide intermediates | native boundary/property tests and independent Fraction oracle |
+| Formula | SUM, AVG/AVERAGE, MIN, MAX; arithmetic and bounded native parser | native/managed existing tests; not complete grammar equivalence |
+| Dependencies | direct/range edges and filtered topological recalculation | failed-mutation regression; 100 random DAGs, 2,000 mutations |
+| Integrity | ABI-96 cell proofs and optional SQLite metadata ledger | existing tamper tests; not encryption, identity authentication or backup |
+| XLSX | supported native reader/writer subset; bounded ZIP validation | synthetic malformed/round-trip tests; not general Excel compatibility |
+| Managed | P/Invoke and OPC utilities | lifetime/concurrency/malformed-image regressions pass; see ABI.md |
+| Desktop | WPF shell with app icon and proof-copy action | build and focused interaction evidence; see DESKTOP.md |
+| Tables/charts/localization | not implemented as requested subsystems | not verified |
 
-The project is built for public benefit. Legal permissions are defined by the Apache License 2.0; that purpose statement does not modify the license.
-
-## Implemented surface
-
-- Exact `int64` rational arithmetic in the native core.
-- Cell kinds: empty, rational, text, bool, spreadsheet error, and formula.
-- Native formula IR/evaluator with references, ranges, arithmetic, `SUM`, `AVERAGE`, `MIN`, `MAX`, and integer-exponent `POW`.
-- Dependency tracking and topological recalculation. Cycles are reported, not broken.
-- SHA-256 cell commit chain with a bounded commit log and explicit audit coverage.
-- Optional SQLite ledger storing commit hashes, not cell payloads.
-- XLSX read/write support.
-- OPC package editing that preserves untouched part payload bytes; ZIP-container byte identity is not claimed.
-- .NET 8 P/Invoke bindings with ABI size/version checks.
-- Windows WPF desktop application (`KHZ Sheet`, version `0.1.0`).
-
-## Numeric contract
-
-Arithmetic in the native model stays exact while the result is representable as `KhzRational`. Unsupported inexact operations are refused instead of silently falling back to floating point.
-
-XLSX export is a separate boundary. When conversion to the file format cannot preserve a value exactly, the writer reports that through `KhzXlsxReport.lossy_cells`.
-
-## Evidence on `main`
-
-Every push to `main` runs:
-
-- **Native CI / Ubuntu:** Release build, native `ctest`, both managed integration tests, and a separate ASAN + UBSAN build/test job.
-- **Desktop Windows:** native shared-library build, WPF desktop build, then both managed integration tests against the Windows DLL produced by that build.
-
-A green workflow is evidence for that commit. This README is not a substitute for a passing run.
-
-## Build
-
-Requirements:
-
-- CMake 3.16+
-- C11 compiler
-- SQLite development library when `KHZ_ENABLE_LEDGER=ON`
-- Python 3 for the generated XLSX fixture tests
-- .NET 8 SDK for managed bindings/tests
-
-```bash
+## Build and test
+```sh
 cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
-cmake --build build/release --parallel
+cmake --build build/release --parallel 4
 ctest --test-dir build/release --output-on-failure
 ```
+Disable the optional SQLite ledger explicitly with `-DKHZ_ENABLE_LEDGER=OFF` when its development package is unavailable. On Windows, use `pwsh -NoProfile -File build-desktop.ps1`.
 
-### Sanitizers
-
-```bash
-cmake -S . -B build/sanitize \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DKHZ_ENABLE_ASAN=ON \
-  -DKHZ_ENABLE_UBSAN=ON
-cmake --build build/sanitize --parallel
-ctest --test-dir build/sanitize --output-on-failure
-```
-
-If a requested sanitizer runtime cannot be linked, configuration fails instead of producing an unsanitized build.
-
-### Managed integration tests
-
-Build the native shared library first, then expose it to the runtime loader:
-
-```bash
-LD_LIBRARY_PATH="$PWD/build/release:${LD_LIBRARY_PATH:-}" \
-  dotnet run --project tests/dotnet/KhzExactLiteral/KhzExactLiteral.csproj -c Release
-
-LD_LIBRARY_PATH="$PWD/build/release:${LD_LIBRARY_PATH:-}" \
-  dotnet run --project tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release
-```
-
-### Windows desktop
-
-```powershell
-./build-desktop.ps1
-```
-
-Use `./build-desktop.ps1 -Run` to launch after a successful build.
-
-## Scope boundaries
-
-KHZ Sheet does not claim Excel feature parity, layout/print fidelity, cloud collaboration, or ZIP-container byte-for-byte reproduction.
-
-The SQLite ledger is an integrity log. Because it stores hashes rather than payloads, it cannot reconstruct spreadsheet values by itself.
-
-## License
-
-Apache License 2.0. See `LICENSE`.
+## Contracts and evidence
+Read BUILDING.md, TESTING.md, ARCHITECTURE.md, NUMERIC-MODEL.md, FORMULA-LANGUAGE.md, ABI.md, XLSX-BOUNDARY.md, OPC-PRESERVATION.md, PROOF-CONTRACT.md, LEDGER.md and PQC-RELEASE.md. TABLES.md, CHARTS.md, LOCALIZATION.md, ACCESSIBILITY.md and DESKTOP.md distinguish implemented surfaces from absent capabilities.
+SECURITY.md and THREAT-MODEL.md describe remaining boundaries. PERFORMANCE.md contains measured results and methodology. RELEASE-CHECKLIST.md defines the unfulfilled release gates. CHANGELOG.md records this intervention. `evidence/20260929` contains normalized command evidence and hashes; private machine paths are not published.
+This is a verified subset of the requested intervention, not a claim of production readiness, financial suitability or safe arbitrary-XLSX handling.

@@ -1,0 +1,7 @@
+{
+  "format": "khz-pqc-keys-v1",
+  "kem": "ML-KEM-768",
+  "signature": "ML-DSA-65",
+  "kem_public_sha256": "c376f3bda81d09944035f567f64146dbb517c1a7f68b2791bfbf99df7215148d",
+  "signature_public_sha256": "0d16b9b5b78c2a27b3cae7f09565d9c08155f05918150bda0a2100b251231050"
+}

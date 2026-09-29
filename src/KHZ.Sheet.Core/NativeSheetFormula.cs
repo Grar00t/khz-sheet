@@ -82,15 +82,15 @@ namespace KHZ.Sheet.Core
 		{
 			result = default;
 
-			IntPtr arena;
-			SheetStatus status = ResolveArena(sheet, out arena);
-
-			if (status != SheetStatus.Ok)
+			if (sheet == null) return SheetStatus.ErrNull;
+			if (sheet.Handle == null) return SheetStatus.ErrState;
+			SheetStatus status = NativeScratchArena.TryCreate(out NativeScratchArena? scratch);
+			if (status != SheetStatus.Ok || scratch == null) return status;
+			using (scratch)
 			{
-				return status;
+				return KhzFormula.Evaluate((IntPtr)sheet.Handle, scratch.DangerousGetHandle(),
+				                           col, row, node, out result);
 			}
-
-			return KhzFormula.Evaluate((IntPtr)sheet.Handle, arena, col, row, node, out result);
 		}
 
 		/// <summary>
@@ -102,47 +102,16 @@ namespace KHZ.Sheet.Core
 		{
 			declared = 0UL;
 
-			IntPtr arena;
-			SheetStatus status = ResolveArena(sheet, out arena);
-
-			if (status != SheetStatus.Ok)
+			if (sheet == null) return SheetStatus.ErrNull;
+			if (sheet.Handle == null) return SheetStatus.ErrState;
+			SheetStatus status = NativeScratchArena.TryCreate(out NativeScratchArena? scratch);
+			if (status != SheetStatus.Ok || scratch == null) return status;
+			using (scratch)
 			{
-				return status;
+				return KhzFormula.DeclareDependencies((IntPtr)sheet.Handle, scratch.DangerousGetHandle(),
+				                                      col, row, node, out declared);
 			}
-
-			return KhzFormula.DeclareDependencies((IntPtr)sheet.Handle, arena, col, row, node,
-			                                      out declared);
 		}
 
-		/// <summary>
-		/// Resolves the sheet's arena for the scratch IR.
-		///
-		/// Asked of the sheet on every call rather than cached. The arena belongs
-		/// to the sheet, and a managed copy of that pointer would be a second
-		/// source of truth for something the sheet is free to change.
-		/// </summary>
-		private static SheetStatus ResolveArena(NativeSheet sheet, out IntPtr arena)
-		{
-			arena = IntPtr.Zero;
-
-			if (sheet == null)
-			{
-				return SheetStatus.ErrNull;
-			}
-			if (sheet.Handle == null)
-			{
-				return SheetStatus.ErrState;
-			}
-
-			void* native = KhzNative.SheetArena(sheet.Handle);
-
-			if (native == null)
-			{
-				return SheetStatus.ErrState;
-			}
-
-			arena = (IntPtr)native;
-			return SheetStatus.Ok;
-		}
 	}
 }

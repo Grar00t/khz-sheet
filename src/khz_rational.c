@@ -1,4 +1,5 @@
 #include "khz_rational.h"
+#include "khz_wide.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -210,41 +211,45 @@ KhzSheetStatus khz_rational_from_i64(int64_t value, KhzRational *out)
 KhzSheetStatus khz_rational_add(KhzRational a, KhzRational b, KhzRational *out)
 {
     uint64_t g;
-    int64_t ad;
-    int64_t bd;
-    int64_t den;
-    int64_t left;
-    int64_t right;
-    int64_t num;
-
-    if (out == NULL) {
-        return KHZ_SHEET_ERR_NULL;
-    }
-    if (!khz_rational_is_valid(a) || !khz_rational_is_valid(b)) {
-        return KHZ_SHEET_ERR_RANGE;
-    }
-
-    /* Reduce the denominators against each other first. The product a.den *
-       b.den overflows far sooner than the lcm, and using it would refuse sums
-       that are perfectly representable. */
+    int64_t ad, bd, den, left, right, num;
+    KhzWide magnitude, other, quotient, denominator;
+    uint64_t remainder, reduce;
+    int negative;
+    if (out == NULL) return KHZ_SHEET_ERR_NULL;
+    if (!khz_rational_is_valid(a) || !khz_rational_is_valid(b)) return KHZ_SHEET_ERR_RANGE;
     g = khz_gcd_u64((uint64_t)a.den, (uint64_t)b.den);
     ad = a.den / (int64_t)g;
     bd = b.den / (int64_t)g;
-
-    if (khz_i64_mul(a.den, bd, &den)) {
+    if (!khz_i64_mul(a.den, bd, &den)
+        && !khz_i64_mul(a.num, bd, &left)
+        && !khz_i64_mul(b.num, ad, &right)
+        && !khz_i64_add(left, right, &num)
+        && num != INT64_MIN) {
+        return khz_rational_make(num, den, out);
+    }
+    /* The cross products and their signed sum fit 127 magnitude bits.
+       Cancellation can make the final canonical value fit even when an
+       intermediate does not. Only a factor of gcd(a.den,b.den) remains
+       cancellable after the reduced cross products have been added. */
+    magnitude = khz_wide_mul(khz_wide_magnitude(a.num), (uint64_t)bd);
+    other = khz_wide_mul(khz_wide_magnitude(b.num), (uint64_t)ad);
+    negative = a.num < 0;
+    khz_wide_signed_add(&magnitude, &negative, other, b.num < 0);
+    if (magnitude.hi == 0 && magnitude.lo == 0) {
+        *out = khz_rational_zero();
+        return KHZ_SHEET_OK;
+    }
+    remainder = khz_wide_div(magnitude, g, &quotient);
+    reduce = khz_wide_gcd(remainder, g);
+    (void)khz_wide_div(magnitude, reduce, &quotient);
+    denominator = khz_wide_mul((uint64_t)ad, (uint64_t)b.den / reduce);
+    if (quotient.hi != 0 || quotient.lo > (uint64_t)INT64_MAX
+        || denominator.hi != 0 || denominator.lo > (uint64_t)INT64_MAX) {
         return KHZ_SHEET_ERR_OVERFLOW;
     }
-    if (khz_i64_mul(a.num, bd, &left)) {
-        return KHZ_SHEET_ERR_OVERFLOW;
-    }
-    if (khz_i64_mul(b.num, ad, &right)) {
-        return KHZ_SHEET_ERR_OVERFLOW;
-    }
-    if (khz_i64_add(left, right, &num)) {
-        return KHZ_SHEET_ERR_OVERFLOW;
-    }
-
-    return khz_rational_make(num, den, out);
+    num = (int64_t)quotient.lo;
+    *out = (KhzRational){negative ? -num : num, (int64_t)denominator.lo};
+    return KHZ_SHEET_OK;
 }
 
 KhzSheetStatus khz_rational_neg(KhzRational a, KhzRational *out)

@@ -1,4 +1,5 @@
 #include "khz_simd.h"
+#include "khz_wide.h"
 
 #if defined(__AVX2__)
 #  include <immintrin.h>
@@ -76,6 +77,31 @@ const char *khz_simd_kernel_name(KhzSimdKernel kernel)
     }
 }
 
+/* Overflow in a machine-width lane is not necessarily overflow of the sum.
+   A signed magnitude accumulator is bounded by count * 2^63; size_t is at
+   most 64 bits on supported targets, so the exact total fits 128 bits. */
+_Static_assert(sizeof(size_t) <= sizeof(uint64_t), "wide sum requires size_t <= 64 bits");
+static KhzWide khz_simd_wide_sum(const int64_t *values, size_t count, int *negative)
+{
+    KhzWide total = {0, 0};
+    *negative = 0;
+    for (size_t i = 0; i < count; ++i) {
+        KhzWide next = {0, khz_wide_magnitude(values[i])};
+        khz_wide_signed_add(&total, negative, next, values[i] < 0);
+    }
+    return total;
+}
+static KhzSheetStatus khz_simd_wide_i64(const int64_t *values, size_t count, int64_t *out)
+{
+    int negative;
+    KhzWide total = khz_simd_wide_sum(values, count, &negative);
+    uint64_t limit = (uint64_t)INT64_MAX + (uint64_t)negative;
+    if (total.hi != 0 || total.lo > limit) return KHZ_SHEET_ERR_OVERFLOW;
+    if (total.lo == UINT64_C(0x8000000000000000)) *out = INT64_MIN;
+    else *out = negative ? -(int64_t)total.lo : (int64_t)total.lo;
+    return KHZ_SHEET_OK;
+}
+
 KhzSheetStatus khz_simd_sum_i64(const int64_t *values, size_t count, int64_t *out)
 {
     int64_t total = (int64_t)0;
@@ -113,7 +139,7 @@ KhzSheetStatus khz_simd_sum_i64(const int64_t *values, size_t count, int64_t *ou
                                           _mm256_xor_si256(v, r));
 
             if (_mm256_movemask_pd(_mm256_castsi256_pd(ov)) != 0) {
-                return KHZ_SHEET_ERR_OVERFLOW;
+                return khz_simd_wide_i64(values, count, out);
             }
 
             acc = r;
@@ -123,7 +149,7 @@ KhzSheetStatus khz_simd_sum_i64(const int64_t *values, size_t count, int64_t *ou
 
         for (lane = 0u; lane < 4u; ++lane) {
             if (khz_add_checked(total, lanes[lane], &total)) {
-                return KHZ_SHEET_ERR_OVERFLOW;
+                return khz_simd_wide_i64(values, count, out);
             }
         }
     }
@@ -139,7 +165,7 @@ KhzSheetStatus khz_simd_sum_i64(const int64_t *values, size_t count, int64_t *ou
             int64x2_t ov = vandq_s64(veorq_s64(acc, r), veorq_s64(v, r));
 
             if (vgetq_lane_s64(ov, 0) < (int64_t)0 || vgetq_lane_s64(ov, 1) < (int64_t)0) {
-                return KHZ_SHEET_ERR_OVERFLOW;
+                return khz_simd_wide_i64(values, count, out);
             }
 
             acc = r;
@@ -149,7 +175,7 @@ KhzSheetStatus khz_simd_sum_i64(const int64_t *values, size_t count, int64_t *ou
 
         for (lane = 0u; lane < 2u; ++lane) {
             if (khz_add_checked(total, lanes[lane], &total)) {
-                return KHZ_SHEET_ERR_OVERFLOW;
+                return khz_simd_wide_i64(values, count, out);
             }
         }
     }
@@ -158,7 +184,7 @@ KhzSheetStatus khz_simd_sum_i64(const int64_t *values, size_t count, int64_t *ou
     /* Tail, and the whole array on a scalar build. */
     for (; i < count; ++i) {
         if (khz_add_checked(total, values[i], &total)) {
-            return KHZ_SHEET_ERR_OVERFLOW;
+            return khz_simd_wide_i64(values, count, out);
         }
     }
 
@@ -167,27 +193,28 @@ KhzSheetStatus khz_simd_sum_i64(const int64_t *values, size_t count, int64_t *ou
 }
 
 KhzSheetStatus khz_simd_sum_scaled(const int64_t *numerators, size_t count,
-                                   int64_t den, KhzRational *out)
+                                    int64_t den, KhzRational *out)
 {
     int64_t total;
+    int negative;
+    KhzWide magnitude, quotient;
+    uint64_t remainder, reduce;
     KhzSheetStatus status;
-
-    if (out == NULL) {
-        return KHZ_SHEET_ERR_NULL;
-    }
-
-    if (den <= (int64_t)0) {
-        return KHZ_SHEET_ERR_RANGE;
-    }
-
+    if (out == NULL) return KHZ_SHEET_ERR_NULL;
+    if (den <= 0) return KHZ_SHEET_ERR_RANGE;
     status = khz_simd_sum_i64(numerators, count, &total);
-    if (status != KHZ_SHEET_OK) {
-        return status;
-    }
-
-    /* One normalisation at the end instead of one per element: the shared
-       denominator makes the intermediate sums exact without reduction. */
-    return khz_rational_make(total, den, out);
+    if (status == KHZ_SHEET_OK && total != INT64_MIN)
+        return khz_rational_make(total, den, out);
+    if (status != KHZ_SHEET_OK && status != KHZ_SHEET_ERR_OVERFLOW) return status;
+    magnitude = khz_simd_wide_sum(numerators, count, &negative);
+    remainder = khz_wide_div(magnitude, (uint64_t)den, &quotient);
+    reduce = khz_wide_gcd(remainder, (uint64_t)den);
+    (void)khz_wide_div(magnitude, reduce, &quotient);
+    if (quotient.hi != 0 || quotient.lo > (uint64_t)INT64_MAX)
+        return KHZ_SHEET_ERR_OVERFLOW;
+    total = (int64_t)quotient.lo;
+    *out = (KhzRational){negative ? -total : total, den / (int64_t)reduce};
+    return KHZ_SHEET_OK;
 }
 
 KhzSheetStatus khz_simd_sum_rational(const KhzRational *values, size_t count,

@@ -29,7 +29,6 @@
 #define KHZ_ZIP_LOCAL_FIXED ((size_t)30)
 #define KHZ_ZIP_MAX_COMMENT ((size_t)65535)
 #define KHZ_ZIP_METHOD_DEFLATE ((uint16_t)8)
-#define KHZ_XLSX_READER_MAX_PART ((size_t)64 * (size_t)1024 * (size_t)1024)
 
 static uint16_t khz_load_le16(const unsigned char *p)
 {
@@ -170,6 +169,61 @@ static KhzSheetStatus khz_zip_payload(const unsigned char *bytes, size_t size,
 	return KHZ_SHEET_OK;
 }
 
+/* Narrow package-name policy, not a general URI normalizer. */
+static int khz_zip_name_valid(const unsigned char *s, size_t n)
+{
+    size_t segment = 0;
+    for (size_t i = 0; i <= n; ++i) {
+        if (i < n && (s[i] < 32 || s[i] == 127 || s[i] == '\\'
+            || s[i] == ':' || s[i] == '%' || s[i] == '?' || s[i] == '#')) return 0;
+        if (i == n || s[i] == '/') {
+            size_t len = i - segment;
+            if ((len == 0 && i != n) || (len == 1 && s[segment] == '.')
+                || (len == 2 && s[segment] == '.' && s[segment+1] == '.')) return 0;
+            segment = i + 1;
+        }
+    }
+    return n != 0 && s[0] != '/';
+}
+static int khz_zip_same_name(const char *a, size_t an, const unsigned char *b, size_t bn)
+{
+    if (an != bn) return 0;
+    for (size_t i = 0; i < an; ++i) {
+        unsigned char x = (unsigned char)a[i], y = b[i];
+        if (x >= 'A' && x <= 'Z') x = (unsigned char)(x + ('a'-'A'));
+        if (y >= 'A' && y <= 'Z') y = (unsigned char)(y + ('a'-'A'));
+        if (x != y) return 0;
+    }
+    return 1;
+}
+static KhzSheetStatus khz_zip_local_metadata(const unsigned char *raw, size_t bound,
+    size_t local, size_t data, size_t packed, size_t unpacked, uint32_t crc,
+    uint16_t flags, uint16_t method, size_t *end)
+{
+    if (khz_load_le16(raw + local + 6) != flags) return KHZ_SHEET_ERR_FORMAT;
+    if ((flags & (uint16_t)~0x080eu) != 0 || (method == 0 && (flags & 6u) != 0))
+        return KHZ_SHEET_ERR_UNSUPPORTED;
+    *end = data + packed; /* khz_zip_payload already bounded this addition. */
+    if ((flags & 8u) == 0) {
+        if (khz_load_le32(raw+local+14) != crc || khz_load_le32(raw+local+18) != packed
+            || khz_load_le32(raw+local+22) != unpacked) return KHZ_SHEET_ERR_FORMAT;
+        return KHZ_SHEET_OK;
+    }
+    if ((khz_load_le32(raw+local+14) != 0 && khz_load_le32(raw+local+14) != crc)
+        || (khz_load_le32(raw+local+18) != 0 && khz_load_le32(raw+local+18) != packed)
+        || (khz_load_le32(raw+local+22) != 0 && khz_load_le32(raw+local+22) != unpacked))
+        return KHZ_SHEET_ERR_FORMAT;
+    /* APPNOTE 4.3.9: accept signed and unsigned 32-bit descriptors. */
+    size_t at = *end;
+    if (bound - at < 12) return KHZ_SHEET_ERR_FORMAT;
+    if (khz_load_le32(raw+at) == UINT32_C(0x08074b50)) at += 4;
+    if (bound - at < 12 || khz_load_le32(raw+at) != crc
+        || khz_load_le32(raw+at+4) != packed || khz_load_le32(raw+at+8) != unpacked)
+        return KHZ_SHEET_ERR_FORMAT;
+    *end = at + 12;
+    return KHZ_SHEET_OK;
+}
+
 KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, size_t size)
 {
 	const unsigned char *raw;
@@ -181,6 +235,8 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 	size_t cursor;
 	size_t index;
 	size_t mark;
+	size_t expanded = 0;
+	size_t starts[KHZ_XLSX_READER_MAX_ENTRIES], ends[KHZ_XLSX_READER_MAX_ENTRIES];
 	KhzXlsxEntry *table;
 	KhzSheetStatus status;
 
@@ -188,6 +244,7 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 	if (reader->initialised == 0 || reader->arena == NULL) return KHZ_SHEET_ERR_STATE;
 	if (reader->loaded != 0) return KHZ_SHEET_ERR_STATE;
 
+	if (size > KHZ_XLSX_READER_MAX_ARCHIVE) return KHZ_SHEET_ERR_LIMIT;
 	raw = (const unsigned char *)bytes;
 	status = khz_zip_find_eocd(raw, size, &eocd);
 	if (status != KHZ_SHEET_OK) return status;
@@ -206,7 +263,7 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 	if (total > KHZ_XLSX_READER_MAX_ENTRIES) return KHZ_SHEET_ERR_LIMIT;
 	if (cd_offset > size || cd_size > size - cd_offset) return KHZ_SHEET_ERR_FORMAT;
 	cd_end = cd_offset + cd_size;
-	if (cd_end > eocd) return KHZ_SHEET_ERR_FORMAT;
+	if (cd_end != eocd) return KHZ_SHEET_ERR_FORMAT;
 
 	mark = khz_arena_mark(reader->arena);
 	table = (KhzXlsxEntry *)khz_arena_alloc_zeroed(reader->arena,
@@ -290,7 +347,7 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 			return KHZ_SHEET_ERR_FORMAT;
 		}
 
-		status = khz_zip_payload(raw, size, local_offset, method,
+		status = khz_zip_payload(raw, cd_offset, local_offset, method,
 		                         central_name, name_len, packed_size, &data_offset);
 		if (status != KHZ_SHEET_OK) {
 			reader->report.entries_rejected += 1u;
@@ -298,6 +355,36 @@ KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, si
 			return status;
 		}
 
+        status = KHZ_SHEET_OK;
+        if (!khz_zip_name_valid(central_name, name_len)) status = KHZ_SHEET_ERR_FORMAT;
+        if (khz_load_le16(raw+cursor+34) != 0 || packed_size == UINT32_MAX
+            || declared_size == UINT32_MAX || local_offset == UINT32_MAX)
+            status = KHZ_SHEET_ERR_UNSUPPORTED;
+        if (status == KHZ_SHEET_OK)
+            status = khz_zip_local_metadata(raw, cd_offset, local_offset, data_offset,
+                packed_size, declared_size, declared_crc, khz_load_le16(raw+cursor+8),
+                method, &ends[index]);
+        starts[index] = local_offset;
+        if (status == KHZ_SHEET_OK) {
+            for (size_t previous = 0; previous < index; ++previous) {
+                if (khz_zip_same_name(table[previous].name, table[previous].name_len, central_name, name_len)
+                    || (starts[index] < ends[previous] && starts[previous] < ends[index])) {
+                    status = KHZ_SHEET_ERR_FORMAT;
+                    break;
+                }
+            }
+        }
+        if (status == KHZ_SHEET_OK && (packed_size > KHZ_XLSX_READER_MAX_ARCHIVE
+            || declared_size > KHZ_XLSX_READER_MAX_TOTAL - expanded
+            || (packed_size == 0 ? declared_size != 0
+                : declared_size / packed_size > KHZ_XLSX_READER_MAX_RATIO
+                  || (declared_size / packed_size == KHZ_XLSX_READER_MAX_RATIO
+                      && declared_size % packed_size != 0)))) status = KHZ_SHEET_ERR_LIMIT;
+        if (status != KHZ_SHEET_OK) {
+            (void)khz_arena_release(reader->arena, mark);
+            return status;
+        }
+        expanded += declared_size;
 		if (method == KHZ_XLSX_METHOD_STORED) {
 			payload = raw + data_offset;
 			reader->report.entries_stored += 1u;

@@ -9,3 +9,9 @@ obj/
 .vs/
 *.user
 *.suo
+*.sk
+dist/
+release/out/
+release/private/
+__pycache__/
+*.pyc

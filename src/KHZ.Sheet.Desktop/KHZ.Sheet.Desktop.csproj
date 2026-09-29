@@ -11,8 +11,14 @@
     <Title>KHZ Sheet</Title>
     <Description>Local-first deterministic spreadsheet workstation</Description>
     <PackageTags>Productivity;Spreadsheet;Local-first;Desktop</PackageTags>
-    <Version>0.1.0</Version>
+    <Version>0.1.0-preview.1</Version>
+    <ApplicationIcon>Assets\khz-sheet.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\khz-sheet.png" />
+    <Resource Include="Assets\khz-sheet.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\KHZ.Sheet.Core\KHZ.Sheet.Core.csproj" />

@@ -52,6 +52,19 @@ extern "C" {
 #define KHZ_XLSX_READER_MAX_STRINGS ((size_t)1 << 20)
 #define KHZ_XLSX_READER_MAX_NAME ((size_t)512)
 
+#ifndef KHZ_XLSX_READER_MAX_ARCHIVE
+#define KHZ_XLSX_READER_MAX_ARCHIVE ((size_t)256 << 20)
+#endif
+#ifndef KHZ_XLSX_READER_MAX_PART
+#define KHZ_XLSX_READER_MAX_PART ((size_t)64 << 20)
+#endif
+#ifndef KHZ_XLSX_READER_MAX_TOTAL
+#define KHZ_XLSX_READER_MAX_TOTAL ((size_t)128 << 20)
+#endif
+#ifndef KHZ_XLSX_READER_MAX_RATIO
+#define KHZ_XLSX_READER_MAX_RATIO ((size_t)1000)
+#endif
+
 #define KHZ_XLSX_SIG_LOCAL ((uint32_t)0x04034b50u)
 #define KHZ_XLSX_SIG_CENTRAL ((uint32_t)0x02014b50u)
 #define KHZ_XLSX_SIG_EOCD ((uint32_t)0x06054b50u)

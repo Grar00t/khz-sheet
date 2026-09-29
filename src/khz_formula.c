@@ -71,6 +71,10 @@ KhzSheetStatus khz_formula_const(KhzFormula *formula, KhzRational value,
     KhzFormulaNode *node = NULL;
     KhzSheetStatus status;
 
+    if (out == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
+
     if (!khz_rational_is_valid(value)) {
         return KHZ_SHEET_ERR_RANGE;
     }
@@ -91,6 +95,10 @@ KhzSheetStatus khz_formula_ref(KhzFormula *formula, uint32_t col, uint32_t row,
 {
     KhzFormulaNode *node = NULL;
     KhzSheetStatus status;
+
+    if (out == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
 
     if (col >= KHZ_GRID_MAX_COLUMNS || row >= KHZ_GRID_MAX_ROWS) {
         return KHZ_SHEET_ERR_RANGE;
@@ -118,6 +126,10 @@ KhzSheetStatus khz_formula_range(KhzFormula *formula,
 {
     KhzFormulaNode *node = NULL;
     KhzSheetStatus status;
+
+    if (out == NULL) {
+        return KHZ_SHEET_ERR_NULL;
+    }
 
     if (col0 >= KHZ_GRID_MAX_COLUMNS || col1 >= KHZ_GRID_MAX_COLUMNS
         || row0 >= KHZ_GRID_MAX_ROWS || row1 >= KHZ_GRID_MAX_ROWS) {
@@ -746,7 +758,13 @@ static KhzSheetStatus khz_parse_unary(KhzParser *p, KhzFormulaNode **out)
 
     if (khz_peek(p) == '+') {
         ++p->pos;
-        return khz_parse_unary(p, out);
+        if (++p->depth > KHZ_FORMULA_MAX_DEPTH) {
+            khz_parse_fail(p, "shallower expression");
+            return KHZ_SHEET_ERR_LIMIT;
+        }
+        status = khz_parse_unary(p, out);
+        --p->depth;
+        return status;
     }
 
     return khz_parse_postfix(p, out);
