@@ -68,6 +68,20 @@
             <Setter Property="Padding" Value="8,5"/>
         </Style>
 
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="{StaticResource PanelRaisedBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource GridBrush}"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="{StaticResource PanelRaisedBrush}"/>
+            <Setter Property="Padding" Value="6,4"/>
+        </Style>
+
         <Style TargetType="DataGrid">
             <Setter Property="Background" Value="#0D1117"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>

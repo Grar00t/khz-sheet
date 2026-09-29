@@ -77,12 +77,18 @@ public sealed class WorksheetSession : IDisposable
     private static readonly nuint CellCapacity = (nuint)200_000;
 
     private readonly Dictionary<long, string> _inputs = new();
-    private readonly Stack<CellEdit> _undo = new();
-    private readonly Stack<CellEdit> _redo = new();
+    private readonly Dictionary<long, CellFormat> _formats = new();
+    private readonly List<TableFormat> _tableFormats = new();
+    private readonly Stack<WorksheetEdit> _undo = new();
+    private readonly Stack<WorksheetEdit> _redo = new();
     private NativeSheet? _native;
     private bool _disposed;
 
-    private readonly record struct CellEdit(int Row, int Column, string Before, string After);
+    private abstract record WorksheetEdit;
+    private sealed record CellEdit(int Row, int Column, string Before, string After) : WorksheetEdit;
+    private sealed record FormatEdit(IReadOnlyList<FormatChange> Changes) : WorksheetEdit;
+    private sealed record TableEdit(TableFormat Table) : WorksheetEdit;
+    private readonly record struct FormatChange(long Key, CellFormat? Before, CellFormat? After);
 
     public WorksheetSession(string name)
     {
@@ -227,15 +233,14 @@ public sealed class WorksheetSession : IDisposable
             return false;
         }
 
-        CellEdit edit = _undo.Pop();
-        if (!CommitCellCore(edit.Row, edit.Column, edit.Before, out message))
+        WorksheetEdit edit = _undo.Pop();
+        if (!ApplyHistory(edit, undo: true, out message))
         {
             _undo.Push(edit);
             return false;
         }
 
         _redo.Push(edit);
-        message = $"undo · {ColumnName(edit.Column)}{edit.Row + 1}";
         return true;
     }
 
@@ -247,15 +252,79 @@ public sealed class WorksheetSession : IDisposable
             return false;
         }
 
-        CellEdit edit = _redo.Pop();
-        if (!CommitCellCore(edit.Row, edit.Column, edit.After, out message))
+        WorksheetEdit edit = _redo.Pop();
+        if (!ApplyHistory(edit, undo: false, out message))
         {
             _redo.Push(edit);
             return false;
         }
 
         _undo.Push(edit);
-        message = $"redo · {ColumnName(edit.Column)}{edit.Row + 1}";
+        return true;
+    }
+
+    public CellFormat GetEffectiveFormat(int row, int column)
+    {
+        if (!InBounds(row, column)) return CellFormat.Empty;
+
+        CellFormat result = CellFormat.Empty;
+        foreach (TableFormat table in _tableFormats)
+        {
+            if (table.Range.Contains(row, column))
+                result = result.Merge(table.FormatFor(row));
+        }
+
+        if (_formats.TryGetValue(Key(row, column), out CellFormat? explicitFormat))
+            result = result.Merge(explicitFormat);
+        return result;
+    }
+
+    public bool ApplyFormat(IEnumerable<(int Row, int Column)> cells, CellFormat overlay, out string message)
+    {
+        List<FormatChange> changes = new();
+        foreach ((int row, int column) in cells.Distinct())
+        {
+            if (!InBounds(row, column)) continue;
+            long key = Key(row, column);
+            _formats.TryGetValue(key, out CellFormat? before);
+            CellFormat after = (before ?? CellFormat.Empty).Merge(overlay);
+            if (Equals(before, after)) continue;
+            _formats[key] = after;
+            changes.Add(new FormatChange(key, before, after));
+        }
+
+        if (changes.Count == 0) { message = "format unchanged"; return false; }
+        _undo.Push(new FormatEdit(changes));
+        _redo.Clear();
+        message = $"formatted {changes.Count:N0} cells";
+        return true;
+    }
+
+    public bool ClearFormat(IEnumerable<(int Row, int Column)> cells, out string message)
+    {
+        List<FormatChange> changes = new();
+        foreach ((int row, int column) in cells.Distinct())
+        {
+            long key = Key(row, column);
+            if (!_formats.Remove(key, out CellFormat? before)) continue;
+            changes.Add(new FormatChange(key, before, null));
+        }
+        if (changes.Count == 0) { message = "no explicit formatting"; return false; }
+        _undo.Push(new FormatEdit(changes));
+        _redo.Clear();
+        message = $"cleared format · {changes.Count:N0} cells";
+        return true;
+    }
+
+    public bool ApplyTableFormat(CellRange range, out string message)
+    {
+        if (!InBounds(range.StartRow, range.StartColumn) || !InBounds(range.EndRow, range.EndColumn))
+        { message = SheetStatusText.Name(SheetStatus.ErrRange); return false; }
+        TableFormat table = new(Guid.NewGuid(), range);
+        _tableFormats.Add(table);
+        _undo.Push(new TableEdit(table));
+        _redo.Clear();
+        message = $"table style · {ColumnName(range.StartColumn)}{range.StartRow + 1}:{ColumnName(range.EndColumn)}{range.EndRow + 1}";
         return true;
     }
 
@@ -284,6 +353,37 @@ public sealed class WorksheetSession : IDisposable
             }
         }
         return false;
+    }
+
+    private bool ApplyHistory(WorksheetEdit edit, bool undo, out string message)
+    {
+        switch (edit)
+        {
+            case CellEdit cell:
+            {
+                string value = undo ? cell.Before : cell.After;
+                if (!CommitCellCore(cell.Row, cell.Column, value, out message)) return false;
+                message = $"{(undo ? "undo" : "redo")} · {ColumnName(cell.Column)}{cell.Row + 1}";
+                return true;
+            }
+            case FormatEdit format:
+                foreach (FormatChange change in format.Changes)
+                {
+                    CellFormat? value = undo ? change.Before : change.After;
+                    if (value is null) _formats.Remove(change.Key);
+                    else _formats[change.Key] = value;
+                }
+                message = $"{(undo ? "undo" : "redo")} format · {format.Changes.Count:N0} cells";
+                return true;
+            case TableEdit table:
+                if (undo) _tableFormats.RemoveAll(x => x.Id == table.Table.Id);
+                else if (!_tableFormats.Any(x => x.Id == table.Table.Id)) _tableFormats.Add(table.Table);
+                message = $"{(undo ? "undo" : "redo")} table style";
+                return true;
+            default:
+                message = "unknown history entry";
+                return false;
+        }
     }
 
     public bool Recalculate(out string message)

@@ -14,6 +14,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -85,6 +86,28 @@
         </Border>
 
         <Border Grid.Row="2"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource GridBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="12,7">
+            <WrapPanel>
+                <TextBlock Text="Format" Margin="0,0,10,0" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                <ComboBox x:Name="FontFamilyBox" Width="170" SelectionChanged="FontFamilyBox_SelectionChanged"/>
+                <ComboBox x:Name="FontSizeBox" Width="74" IsEditable="True" SelectionChanged="FontSizeBox_SelectionChanged"/>
+                <Button Content="B" Width="34" Padding="0,7" FontWeight="Bold" Click="Bold_Click"/>
+                <Button Content="I" Width="34" Padding="0,7" FontStyle="Italic" Click="Italic_Click"/>
+                <ComboBox x:Name="TextColorBox" Width="120" SelectionChanged="TextColorBox_SelectionChanged"/>
+                <ComboBox x:Name="FillColorBox" Width="120" SelectionChanged="FillColorBox_SelectionChanged"/>
+                <Button Content="Left" Click="AlignLeft_Click"/>
+                <Button Content="Center" Click="AlignCenter_Click"/>
+                <Button Content="Right" Click="AlignRight_Click"/>
+                <Button Content="Borders" Click="Borders_Click"/>
+                <Button Content="Table Style" Click="TableStyle_Click"/>
+                <Button Content="Clear Format" Click="ClearFormat_Click"/>
+            </WrapPanel>
+        </Border>
+
+        <Border Grid.Row="3"
                 Background="{StaticResource PanelRaisedBrush}"
                 BorderBrush="{StaticResource GridBrush}"
                 BorderThickness="0,0,0,1"
@@ -126,7 +149,7 @@
         </Border>
 
         <DataGrid x:Name="SheetGrid"
-                  Grid.Row="3"
+                  Grid.Row="4"
                   ItemsSource="{Binding}"
                   AutoGenerateColumns="True"
                   RowHeaderWidth="52"
@@ -144,7 +167,7 @@
                   VirtualizingPanel.IsVirtualizing="True"
                   VirtualizingPanel.VirtualizationMode="Recycling"/>
 
-        <Border Grid.Row="4"
+        <Border Grid.Row="5"
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource GridBrush}"
                 BorderThickness="0,1,0,0"
@@ -211,7 +234,7 @@
             </DockPanel>
         </Border>
 
-        <Border Grid.Row="5"
+        <Border Grid.Row="6"
                 Background="#090C10"
                 BorderBrush="{StaticResource GridBrush}"
                 BorderThickness="0,1,0,0"
