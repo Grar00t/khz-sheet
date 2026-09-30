@@ -15,7 +15,18 @@ endif()
 # never auto-vectorised past the baseline CPU contract. This is compile-time
 # selection, not runtime dispatch; an AVX2 build must run on an AVX2 CPU.
 option(KHZ_ENABLE_AVX2 "Compile khz_simd.c with AVX2 (requires an AVX2 CPU at runtime)" OFF)
-option(KHZ_ENABLE_LEDGER "Compile the SQLite proof-chain ledger" ON)
+# Windows builds remain usable without a local SQLite development package.
+# Explicit ON is still mandatory: missing SQLite must never silently disable it.
+set(KHZ_LEDGER_DEFAULT ON)
+if(WIN32)
+    set(KHZ_LEDGER_DEFAULT AUTO)
+endif()
+set(KHZ_ENABLE_LEDGER "${KHZ_LEDGER_DEFAULT}" CACHE STRING "SQLite ledger: AUTO, ON, or OFF")
+set_property(CACHE KHZ_ENABLE_LEDGER PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${KHZ_ENABLE_LEDGER}" KHZ_LEDGER_MODE)
+if(NOT KHZ_LEDGER_MODE MATCHES "^(AUTO|ON|OFF)$")
+    message(FATAL_ERROR "KHZ_ENABLE_LEDGER must be AUTO, ON, or OFF")
+endif()
 option(KHZ_BUILD_SELFTEST "Build the self-test executable" ON)
 option(KHZ_BUILD_TESTS "Build the end-to-end and regression tests" ON)
 option(KHZ_BUILD_SHARED "Build the shared library used by the C# bindings" ON)
@@ -24,6 +35,21 @@ option(KHZ_ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer" OFF)
 
 enable_testing()
 include(CheckCCompilerFlag)
+include(CheckCSourceCompiles)
+
+# Atomics are part of the public headers, so tests and consumers built here
+# need the flag as well as the object library. Verify the actual C11 operation.
+if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    set(CMAKE_REQUIRED_FLAGS "/std:c11 /experimental:c11atomics")
+    check_c_source_compiles("#include <stdatomic.h>
+int main(void) { atomic_int v; atomic_init(&v, 0); return atomic_fetch_add(&v, 1); }"
+        KHZ_MSVC_C11_ATOMICS)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT KHZ_MSVC_C11_ATOMICS)
+        message(FATAL_ERROR "MSVC with working /experimental:c11atomics support is required")
+    endif()
+    add_compile_options(/experimental:c11atomics)
+endif()
 
 set(KHZ_SANITIZER_FLAGS "")
 if(KHZ_ENABLE_ASAN)
@@ -97,20 +123,23 @@ else()
 endif()
 
 set(KHZ_LEDGER_ACTIVE OFF)
-if(KHZ_ENABLE_LEDGER)
+if(NOT KHZ_LEDGER_MODE STREQUAL "OFF")
     find_path(KHZ_SQLITE3_INCLUDE_DIR sqlite3.h)
     find_library(KHZ_SQLITE3_LIBRARY NAMES sqlite3)
 
-    if(NOT KHZ_SQLITE3_INCLUDE_DIR OR NOT KHZ_SQLITE3_LIBRARY)
+    if(KHZ_SQLITE3_INCLUDE_DIR AND KHZ_SQLITE3_LIBRARY)
+        set(KHZ_LEDGER_ACTIVE ON)
+        target_include_directories(khz_sheet_objects PRIVATE ${KHZ_SQLITE3_INCLUDE_DIR})
+        target_compile_definitions(khz_sheet_objects PRIVATE KHZ_WITH_SQLITE=1)
+        message(STATUS "khz_sheet: ledger enabled against ${KHZ_SQLITE3_LIBRARY}")
+    elseif(KHZ_LEDGER_MODE STREQUAL "ON")
         message(FATAL_ERROR
             "KHZ_ENABLE_LEDGER=ON but system sqlite3 was not found. Install its development package or configure with -DKHZ_ENABLE_LEDGER=OFF")
+    else()
+        message(WARNING "SQLite development files not found; AUTO disables the ledger")
     endif()
-
-    set(KHZ_LEDGER_ACTIVE ON)
-    target_include_directories(khz_sheet_objects PRIVATE ${KHZ_SQLITE3_INCLUDE_DIR})
-    target_compile_definitions(khz_sheet_objects PRIVATE KHZ_WITH_SQLITE=1)
-    message(STATUS "khz_sheet: ledger enabled against ${KHZ_SQLITE3_LIBRARY}")
-else()
+endif()
+if(NOT KHZ_LEDGER_ACTIVE)
     message(STATUS "khz_sheet: ledger disabled; khz_ledger_* returns ERR_UNSUPPORTED")
 endif()
 
@@ -125,7 +154,10 @@ endif()
 
 if(KHZ_BUILD_SHARED)
     add_library(khz_sheet_shared SHARED $<TARGET_OBJECTS:khz_sheet_objects>)
-    set_target_properties(khz_sheet_shared PROPERTIES OUTPUT_NAME khz_sheet)
+    set_target_properties(khz_sheet_shared PROPERTIES
+        OUTPUT_NAME khz_sheet
+        WINDOWS_EXPORT_ALL_SYMBOLS ON
+    )
     target_include_directories(khz_sheet_shared PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>

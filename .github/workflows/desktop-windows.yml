@@ -31,10 +31,9 @@ jobs:
       - name: Native tests on Windows
         shell: pwsh
         run: |
-          $env:CFLAGS = "/std:c11 /experimental:c11atomics"
           cmake -S . -B build/windows-tests `
             -DKHZ_ENABLE_AVX2=OFF `
-            -DKHZ_ENABLE_LEDGER=OFF `
+            -DKHZ_ENABLE_LEDGER=AUTO `
             -DKHZ_BUILD_SELFTEST=ON `
             -DKHZ_BUILD_TESTS=ON `
             -DKHZ_BUILD_SHARED=OFF
