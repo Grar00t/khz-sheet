@@ -58,7 +58,9 @@ typedef enum KhzFormulaOp {
     KHZ_FORMULA_AVG   = 9,
     KHZ_FORMULA_MIN   = 10,
     KHZ_FORMULA_MAX   = 11,
-    KHZ_FORMULA_POW   = 12  /* exact integer exponent only, see below */
+    KHZ_FORMULA_POW   = 12, /* exact integer exponent only, see below */
+    KHZ_FORMULA_ABS   = 13, /* absolute value of one numeric argument */
+    KHZ_FORMULA_IF    = 14  /* IF(cond, then, else); non-zero cond is true */
 } KhzFormulaOp;
 
 /* RANGE and NEG are additions to the ten operations that were specified.
