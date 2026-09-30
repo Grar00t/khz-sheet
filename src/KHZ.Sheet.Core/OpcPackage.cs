@@ -19,6 +19,22 @@ namespace KHZ.Sheet.Core
 		public const string ContentTypesPart = "[Content_Types].xml";
 
 		private const int CopyBufferSize = 81920;
+        public const long MaxArchiveBytes = 128L * 1024 * 1024;
+        public const long MaxExpandedBytes = 128L * 1024 * 1024;
+        public const int MaxPartBytes = 16 * 1024 * 1024;
+        public const int MaxEntries = 4096;
+        private static bool SafeName(string name) => name.Length is > 0 and <= 512 &&
+            !name.StartsWith("/", StringComparison.Ordinal) && !name.Contains('\\') && !name.Contains(':') &&
+            !name.Contains('%') && Array.TrueForAll(name.Split('/'), p => p.Length > 0 && p != "." && p != "..");
+        private static void CopyBounded(Stream source, Stream target, long limit)
+        {
+            byte[] buffer = new byte[CopyBufferSize]; long total = 0; int read;
+            while ((read = source.Read(buffer, 0, buffer.Length)) > 0) {
+                total += read;
+                if (total > limit) throw new InvalidDataException("OPC resource limit");
+                target.Write(buffer, 0, read);
+            }
+        }
 
 		private readonly List<string> _order = new List<string>();
 
@@ -66,6 +82,7 @@ namespace KHZ.Sheet.Core
 			{
 				return SheetStatus.ErrNull;
 			}
+            if (!source.CanRead) return SheetStatus.ErrState;
 
 			OpcPackage result = new OpcPackage();
 
@@ -73,12 +90,14 @@ namespace KHZ.Sheet.Core
 			{
 				using (MemoryStream buffer = new MemoryStream())
 				{
-					source.CopyTo(buffer, CopyBufferSize);
+					CopyBounded(source, buffer, MaxArchiveBytes);
 					buffer.Position = 0;
 
 					using (ZipArchive archive = new ZipArchive(buffer, ZipArchiveMode.Read, leaveOpen: true))
 					{
-						foreach (ZipArchiveEntry entry in archive.Entries)
+						if (archive.Entries.Count > MaxEntries) throw new InvalidDataException("OPC entry limit");
+                        long expanded = 0;
+                        foreach (ZipArchiveEntry entry in archive.Entries)
 						{
 							string name = entry.FullName;
 
@@ -88,7 +107,12 @@ namespace KHZ.Sheet.Core
 								continue;
 							}
 
-							if (result._parts.ContainsKey(name))
+							if (!SafeName(name)) throw new InvalidDataException("OPC path");
+                            expanded += entry.Length;
+                            if (entry.Length > MaxPartBytes || expanded > MaxExpandedBytes ||
+                                entry.Length > Math.Max(1, entry.CompressedLength) * 2000)
+                                throw new InvalidDataException("OPC expansion limit");
+                            if (result._parts.ContainsKey(name))
 							{
 								result._droppedEntries.Add(name);
 								continue;
@@ -98,7 +122,8 @@ namespace KHZ.Sheet.Core
 							using (Stream entryStream = entry.Open())
 							using (MemoryStream partBuffer = new MemoryStream())
 							{
-								entryStream.CopyTo(partBuffer, CopyBufferSize);
+								CopyBounded(entryStream, partBuffer, Math.Min(MaxPartBytes, entry.Length));
+								if (partBuffer.Length != entry.Length) throw new InvalidDataException("OPC member size mismatch");
 								bytes = partBuffer.ToArray();
 							}
 
@@ -180,9 +205,9 @@ namespace KHZ.Sheet.Core
 		{
 			if (_disposed) return SheetStatus.ErrRange;
 			if (partName is null || content is null) return SheetStatus.ErrNull;
-			if (partName.Length == 0 || partName.EndsWith("/", StringComparison.Ordinal)
-				|| content.Length == 0) return SheetStatus.ErrFormat;
+			if (!SafeName(partName) || content.Length == 0 || content.Length > MaxPartBytes) return SheetStatus.ErrFormat;
 			if (_parts.ContainsKey(partName)) return SheetStatus.ErrState;
+            if (_parts.Count >= MaxEntries || TotalBytes() + content.Length > MaxExpandedBytes) return SheetStatus.ErrLimit;
 
 			_parts.Add(partName, (byte[])content.Clone());
 			_order.Add(partName);
@@ -210,7 +235,9 @@ namespace KHZ.Sheet.Core
 				return SheetStatus.ErrMissing;
 			}
 
-			/* The package owns its part bytes. Retaining the caller's array would
+			if (content.Length > MaxPartBytes || TotalBytes() - _parts[partName].Length + content.Length > MaxExpandedBytes) return SheetStatus.ErrLimit;
+
+            /* The package owns its part bytes. Retaining the caller's array would
 			   let later external mutation change the package without going through
 			   this method, contradicting the single-mutation boundary above. */
 			_parts[partName] = (byte[])content.Clone();
@@ -266,6 +293,8 @@ namespace KHZ.Sheet.Core
 
 			return SheetStatus.Ok;
 		}
+
+        private long TotalBytes() { long n = 0; foreach (byte[] bytes in _parts.Values) n += bytes.Length; return n; }
 
 		/// <inheritdoc />
 		public void Dispose()

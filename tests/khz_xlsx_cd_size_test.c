@@ -34,7 +34,12 @@ static void put_le32(unsigned char *p, uint32_t value)
 
 static unsigned char *read_file(const char *path, size_t *size_out)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f = NULL;
+#if defined(_MSC_VER)
+    if (fopen_s(&f, path, "rb") != 0) f = NULL;
+#else
+    f = fopen(path, "rb");
+#endif
     unsigned char *bytes;
     long end;
     size_t size;

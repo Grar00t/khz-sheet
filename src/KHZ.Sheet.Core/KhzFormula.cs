@@ -22,6 +22,21 @@ namespace KHZ.Sheet.Core
 		Min = 10,
 		Max = 11,
 		Power = 12,
+		Count = 13,
+		CountA = 14,
+		Product = 15,
+		Abs = 16,
+		Round = 17,
+		Ceiling = 18,
+		Floor = 19,
+		If = 20,
+		Equal = 21,
+		NotEqual = 22,
+		Less = 23,
+		LessEqual = 24,
+		Greater = 25,
+		GreaterEqual = 26,
+
 	}
 
 	/// <summary>An exact rational, mirroring KhzRational.</summary>
@@ -382,6 +397,8 @@ namespace KHZ.Sheet.Core
 
 			switch (node)
 			{
+				case BooleanNode boolean:
+					return LowerNumber(block, new NumberNode(boolean.Value ? 1 : 0, boolean.Value ? "1" : "0"), ref result);
 				case NumberNode number:
 					return LowerNumber(block, number, ref result);
 				case GroupNode group:
@@ -421,11 +438,8 @@ namespace KHZ.Sheet.Core
 			}
 			else
 			{
-				SheetStatus repaired = FromDouble(number.Value, out rational);
-				if (repaired != SheetStatus.Ok)
-				{
-					return repaired;
-				}
+                // A binary float cannot recover the decimal literal the caller meant.
+                return SheetStatus.ErrUnsupported;
 			}
 
 			IntPtr node = IntPtr.Zero;
@@ -549,7 +563,9 @@ namespace KHZ.Sheet.Core
 
 			long numerator = (long)mantissa;
 			long denominator = 1L;
-			int netExponent = exponent - fractionDigits;
+			long netExponent = (long)exponent - fractionDigits;
+            if (numerator == 0) { rational.Denominator = 1; return SheetStatus.Ok; }
+            if (netExponent is < -38 or > 38) return SheetStatus.ErrOverflow;
 
 			if (netExponent > 0)
 			{
@@ -564,7 +580,7 @@ namespace KHZ.Sheet.Core
 			}
 			else if (netExponent < 0)
 			{
-				int scale = -netExponent;
+				int scale = (int)-netExponent;
 				for (int k = 0; k < scale; ++k)
 				{
 					if (denominator > long.MaxValue / 10L)
@@ -598,68 +614,6 @@ namespace KHZ.Sheet.Core
 				y = t;
 			}
 			return (long)x;
-		}
-
-		private static SheetStatus FromDouble(double value, out KhzRational rational)
-		{
-			rational = default;
-			if (double.IsNaN(value) || double.IsInfinity(value))
-			{
-				return SheetStatus.ErrOverflow;
-			}
-
-			decimal exact;
-			try
-			{
-				exact = decimal.Parse(value.ToString("R", CultureInfo.InvariantCulture),
-				                      NumberStyles.Float, CultureInfo.InvariantCulture);
-			}
-			catch (OverflowException)
-			{
-				return SheetStatus.ErrOverflow;
-			}
-			catch (FormatException)
-			{
-				return SheetStatus.ErrFormat;
-			}
-
-			Span<int> bits = stackalloc int[4];
-			decimal.GetBits(exact, bits);
-			if (bits[2] != 0)
-			{
-				return SheetStatus.ErrOverflow;
-			}
-
-			ulong mantissa = ((ulong)(uint)bits[1] << 32) | (uint)bits[0];
-			if (mantissa > long.MaxValue)
-			{
-				return SheetStatus.ErrOverflow;
-			}
-
-			int scale = (bits[3] >> 16) & 0xFF;
-			bool negative = (bits[3] & unchecked((int)0x80000000)) != 0;
-
-			long denominator = 1L;
-			for (int i = 0; i < scale; ++i)
-			{
-				if (denominator > long.MaxValue / 10L)
-				{
-					return SheetStatus.ErrOverflow;
-				}
-				denominator *= 10L;
-			}
-
-			long numerator = (long)mantissa;
-			long divisor = Gcd(numerator, denominator);
-			if (divisor > 1L)
-			{
-				numerator /= divisor;
-				denominator /= divisor;
-			}
-
-			rational.Numerator = negative ? -numerator : numerator;
-			rational.Denominator = denominator;
-			return SheetStatus.Ok;
 		}
 
 		private static SheetStatus LowerReference(byte* block, string text, ref IntPtr result)
@@ -788,6 +742,12 @@ namespace KHZ.Sheet.Core
 		private static SheetStatus LowerBinary(byte* block, BinaryNode binary, int depth,
 		                                       ref IntPtr result)
 		{
+			if (binary.Operator == ":")
+			{
+				if (binary.Left is not ReferenceNode first || binary.Right is not ReferenceNode last)
+					return SheetStatus.ErrUnsupported;
+				return LowerReference(block, first.Text + ":" + last.Text, ref result);
+			}
 			KhzFormulaOp op;
 
 			switch (binary.Operator)
@@ -797,6 +757,13 @@ namespace KHZ.Sheet.Core
 				case "*": op = KhzFormulaOp.Multiply; break;
 				case "/": op = KhzFormulaOp.Divide; break;
 				case "^": op = KhzFormulaOp.Power; break;
+				case "=": op = KhzFormulaOp.Equal; break;
+				case "<>": op = KhzFormulaOp.NotEqual; break;
+				case "<": op = KhzFormulaOp.Less; break;
+				case "<=": op = KhzFormulaOp.LessEqual; break;
+				case ">": op = KhzFormulaOp.Greater; break;
+				case ">=": op = KhzFormulaOp.GreaterEqual; break;
+
 				default:
 					return SheetStatus.ErrUnsupported;
 			}
@@ -833,6 +800,15 @@ namespace KHZ.Sheet.Core
 				case "AVERAGE": op = KhzFormulaOp.Average; break;
 				case "MIN": op = KhzFormulaOp.Min; break;
 				case "MAX": op = KhzFormulaOp.Max; break;
+				case "COUNT": op = KhzFormulaOp.Count; break;
+				case "COUNTA": op = KhzFormulaOp.CountA; break;
+				case "PRODUCT": op = KhzFormulaOp.Product; break;
+				case "ABS": op = KhzFormulaOp.Abs; break;
+				case "ROUND": op = KhzFormulaOp.Round; break;
+				case "CEILING": op = KhzFormulaOp.Ceiling; break;
+				case "FLOOR": op = KhzFormulaOp.Floor; break;
+				case "IF": op = KhzFormulaOp.If; break;
+
 				default:
 					return SheetStatus.ErrUnsupported;
 			}

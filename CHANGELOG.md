@@ -1,4 +1,13 @@
-# Changes from f19d09f067f35380830a5128e1996391faae68b9
+# Windows and subsystem enhancement (2026-09-30)
+
+- Enable/probe MSVC C11 atomics and Windows LEDGER=AUTO fallback; default strict native/managed warnings and scoped compiler TEMP handling in verification.
+- Add exact COUNT/COUNTA, PRODUCT, ABS, ROUND, CEILING, FLOOR, lazy IF and comparisons. Align managed range/function lowering and bound managed parsing; reject literals without exact source text.
+- Round-trip explicit RGB styles, independent borders, supported custom formats, dimensions, frozen columns and four themes through a bounded, staged desktop XLSX importer.
+- Add semantic tables, exact native SUM totals with grouped history, header validation and editable coordinate-preserving sort views. Add Bar/Column/Line models, live WPF charts, accessible exact data descriptions and Open XML drawing/chart parts.
+- Bound OPC memory/expansion and XML nesting/tokens, refuse DTDs and unsupported import structures, and expand malformed workbook regressions.
+- Add reproducible Windows/Linux verification scripts and subsystem interaction/round-trip tests. Current evidence is recorded separately from claims of complete Excel compatibility or measured user benefit.
+
+## Earlier changes from f19d09f067f35380830a5128e1996391faae68b9
 - Guard NULL formula constructor output pointers before allocation; bound unary-plus recursion.
 - Preserve representable exact addition/subtraction and scaled sums when only an intermediate overflows. Preserve scalar/SIMD final-sum equivalence through a private C11 two-limb fallback.
 - Roll back newly declared native dependency cells/edges/flags on failure. Bound public dependency walking. Restore a formula cell after a failed recalculation commit.

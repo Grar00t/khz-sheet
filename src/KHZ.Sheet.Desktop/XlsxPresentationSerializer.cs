@@ -7,7 +7,7 @@ using KHZ.Sheet.Core;
 
 namespace KHZ.Sheet.Desktop;
 
-internal static class XlsxPresentationSerializer
+internal static partial class XlsxPresentationSerializer
 {
     private const string ContentTypesPart = "[Content_Types].xml";
     private const string WorkbookRelsPart = "xl/_rels/workbook.xml.rels";
@@ -17,20 +17,20 @@ internal static class XlsxPresentationSerializer
         "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml";
     private const string StylesRelationship =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
-    private const long MaxXmlCharacters = 16L * 1024L * 1024L;
 
     private readonly record struct FontKey(
         string Family, double Size, bool Bold, bool Italic, bool Underline, string? Color);
 
-    private readonly record struct BorderKey(string Color, string Style);
+    private readonly record struct BorderKey(CellBorder? Left, CellBorder? Right, CellBorder? Top, CellBorder? Bottom);
     public static bool TryApply(
         string sourcePath,
         string destinationPath,
         IReadOnlyList<CellPresentation> cells,
+        WorksheetSession session,
         out string message)
     {
         message = string.Empty;
-        if (cells.Count == 0)
+        if (cells.Count == 0 && !session.HasWorkbookObjects)
         {
             message = "no presentation styles";
             return false;
@@ -68,7 +68,7 @@ internal static class XlsxPresentationSerializer
                     return false;
                 }
 
-                XDocument styles = BuildStyles(cells, out Dictionary<CellFormat, int> styleIndexes);
+                XDocument styles = BuildStyles(cells, session.Theme, out Dictionary<CellFormat, int> styleIndexes);
                 if (!ApplyContentTypes(contentTypes!) ||
                     !ApplyWorkbookRelationship(workbookRels!) ||
                     !ApplyCellStyles(sheet!, cells, styleIndexes))
@@ -77,6 +77,9 @@ internal static class XlsxPresentationSerializer
                     return false;
                 }
 
+                ApplyLayout(sheet!, session);
+                ApplyObjects(package, sheet!, contentTypes!, session);
+                if (session.Theme is not null) ApplyTheme(package, contentTypes!, workbookRels!, session.Theme);
                 if (package.TryReplacePart(ContentTypesPart, Serialize(contentTypes!)) != SheetStatus.Ok ||
                     package.TryReplacePart(WorkbookRelsPart, Serialize(workbookRels!)) != SheetStatus.Ok ||
                     package.TryReplacePart(SheetPart, Serialize(sheet!)) != SheetStatus.Ok)
@@ -113,6 +116,11 @@ internal static class XlsxPresentationSerializer
             message = ex.Message;
             return false;
         }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException or ArgumentException)
+        {
+            message = ex.Message;
+            return false;
+        }
         catch (XmlException ex)
         {
             message = ex.Message;
@@ -121,10 +129,11 @@ internal static class XlsxPresentationSerializer
     }
     private static XDocument BuildStyles(
         IReadOnlyList<CellPresentation> cells,
+        SheetTheme? theme,
         out Dictionary<CellFormat, int> styleIndexes)
     {
         XNamespace x = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-        List<FontKey> fonts = [new FontKey(CellFormatDefaults.FontFamily, CellFormatDefaults.FontSize, false, false, false, null)];
+        List<FontKey> fonts = [new FontKey(CellFormatDefaults.FontFamily, CellFormatDefaults.FontSize, false, false, false, theme?.Text)];
         List<string> fills = [string.Empty, "gray125"];
         List<BorderKey?> borders = [null];
         Dictionary<FontKey, int> fontIds = new() { [fonts[0]] = 0 };
@@ -135,6 +144,7 @@ internal static class XlsxPresentationSerializer
         List<CellFormat> formats = new();
         foreach (CellPresentation cell in cells)
         {
+            if (!cell.Format.IsValid) throw new FormatException("Invalid format");
             if (!styleIndexes.ContainsKey(cell.Format))
             {
                 styleIndexes[cell.Format] = 0;
@@ -148,6 +158,8 @@ internal static class XlsxPresentationSerializer
             EnsureFill(format, fills, fillIds);
             EnsureBorder(format, borders, borderIds);
         }
+        if (formats.Count >= 4096 || fonts.Count > 4096 || fills.Count > 4096 || borders.Count > 4096)
+            throw new InvalidDataException("Style table limit (4096)");
         XElement fontsElement = new(x + "fonts", new XAttribute("count", fonts.Count));
         foreach (FontKey font in fonts)
         {
@@ -180,11 +192,16 @@ internal static class XlsxPresentationSerializer
         {
             BorderKey border = borders[i]!.Value;
             XElement element = new(x + "border");
-            foreach (string side in new[] { "left", "right", "top", "bottom" })
+            string[] sides = ["left", "right", "top", "bottom"];
+            CellBorder?[] edges = [border.Left, border.Right, border.Top, border.Bottom];
+            for (int edge = 0; edge < 4; ++edge)
             {
-                element.Add(new XElement(x + side,
-                    new XAttribute("style", border.Style),
-                    new XElement(x + "color", new XAttribute("rgb", Argb(border.Color)))));
+                XElement side = new(x + sides[edge]);
+                if (edges[edge] is CellBorder b) {
+                    side.Add(new XAttribute("style", b.Style));
+                    side.Add(new XElement(x + "color", new XAttribute("rgb", Argb(b.Color))));
+                }
+                element.Add(side);
             }
             element.Add(new XElement(x + "diagonal"));
             bordersElement.Add(element);
@@ -215,12 +232,14 @@ internal static class XlsxPresentationSerializer
             if (fillId != 0) xf.Add(new XAttribute("applyFill", "1"));
             if (borderId != 0) xf.Add(new XAttribute("applyBorder", "1"));
             if (format.NumberFormat is not null) xf.Add(new XAttribute("applyNumberFormat", "1"));
-            if (format.Alignment is not null || format.WrapText is not null)
+            if (format.Alignment is not null || format.WrapText is not null || format.VerticalAlignment is not null)
             {
                 xf.Add(new XAttribute("applyAlignment", "1"));
                 XElement alignmentElement = new(x + "alignment");
                 if (format.Alignment is CellTextAlignment alignment)
                     alignmentElement.Add(new XAttribute("horizontal", AlignmentName(alignment)));
+                if (format.VerticalAlignment is CellVerticalAlignment vertical)
+                    alignmentElement.Add(new XAttribute("vertical", vertical.ToString().ToLowerInvariant()));
                 if (format.WrapText == true)
                     alignmentElement.Add(new XAttribute("wrapText", "1"));
                 xf.Add(alignmentElement);
@@ -232,6 +251,10 @@ internal static class XlsxPresentationSerializer
         return new XDocument(
             new XDeclaration("1.0", "UTF-8", "yes"),
             new XElement(x + "styleSheet",
+                new XElement(x + "numFmts", new XAttribute("count", "3"),
+                    new XElement(x + "numFmt", new XAttribute("numFmtId", "164"), new XAttribute("formatCode", "# ?/??????????????????")),
+                    new XElement(x + "numFmt", new XAttribute("numFmtId", "165"), new XAttribute("formatCode", "\"USD \"#,##0.00")),
+                    new XElement(x + "numFmt", new XAttribute("numFmtId", "166"), new XAttribute("formatCode", "yyyy-mm-dd"))),
                 fontsElement,
                 fillsElement,
                 bordersElement,
@@ -275,8 +298,8 @@ internal static class XlsxPresentationSerializer
         List<BorderKey?> borders,
         Dictionary<BorderKey, int> ids)
     {
-        if (format.Border is null) return;
-        BorderKey key = new(format.Border, BorderStyle(format.BorderThickness));
+        BorderKey key = BorderKeyFor(format);
+        if (key == default) return;
         if (ids.ContainsKey(key)) return;
         ids[key] = borders.Count;
         borders.Add(key);
@@ -302,10 +325,15 @@ internal static class XlsxPresentationSerializer
         format.Background is not null ? ids[format.Background] : 0;
     private static int BorderId(CellFormat format, Dictionary<BorderKey, int> ids)
     {
-        if (format.Border is null) return 0;
-        return ids[new BorderKey(format.Border, BorderStyle(format.BorderThickness))];
+        BorderKey key = BorderKeyFor(format);
+        return key == default ? 0 : ids[key];
     }
 
+    private static BorderKey BorderKeyFor(CellFormat f)
+    {
+        CellBorder? all = f.Border is null ? null : new CellBorder(BorderStyle(f.BorderThickness), f.Border);
+        return new(f.LeftBorder ?? all, f.RightBorder ?? all, f.TopBorder ?? all, f.BottomBorder ?? all);
+    }
     private static string BorderStyle(double? thickness) =>
         thickness is >= 3.0 ? "thick" : thickness is >= 2.0 ? "medium" : "thin";
 
@@ -431,17 +459,7 @@ internal static class XlsxPresentationSerializer
         if (package.TryOpenPart(partName, out Stream? stream) != SheetStatus.Ok || stream is null)
             return false;
 
-        using (stream)
-        using (XmlReader reader = XmlReader.Create(stream, new XmlReaderSettings
-        {
-            DtdProcessing = DtdProcessing.Prohibit,
-            XmlResolver = null,
-            MaxCharactersInDocument = MaxXmlCharacters
-        }))
-        {
-            document = XDocument.Load(reader, LoadOptions.None);
-            return true;
-        }
+        using (stream) { document = BoundedXml.Load(stream); return true; }
     }
 
     private static byte[] Serialize(XDocument document)

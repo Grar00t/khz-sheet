@@ -5,3 +5,5 @@ Integer aggregate sums now use an exact two-limb fallback when a scalar prefix o
 Generic mixed-denominator sequential aggregates may still reject a nonrepresentable intermediate even when later cancellation would fit. Exact arbitrary-length expression rearrangement is not implemented.
 Validation: `khz_numeric_boundary_test`, `khz_rational_oracle.py`. The independent Python Fraction oracle is development-only. It checks both results and unchanged output on rejected arithmetic.
 XLSX numeric cells are not a lossless rational transport. See XLSX-BOUNDARY.md. Approximate statistics and irrational roots are not implemented.
+
+Explicit `ROUND`, `FLOOR` and `CEILING` return canonical rational results using integer arithmetic. ROUND supports integer decimal places -18..18 and ties away from zero; its scale/divide/reduce path uses the existing two-limb 128-bit implementation. The Fraction oracle checks all three operations, including unchanged outputs on rejected results. Float-only managed AST literals fail closed. WPF display and Open XML chart caches may approximate values for presentation; they never feed results back into C.

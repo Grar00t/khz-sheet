@@ -43,6 +43,7 @@ namespace KHZ.Sheet.Core
 			List<FormulaToken> output = new List<FormulaToken>();
 			int i = 0;
 			int n = formula.Length;
+            if (n > 8192) return SheetStatus.ErrLimit;
 
 			if (n > 0 && formula[0] == '=')
 			{

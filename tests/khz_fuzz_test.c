@@ -129,7 +129,12 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    FILE *f = fopen(argv[1], "rb");
+    FILE *f = NULL;
+#if defined(_MSC_VER)
+    if (fopen_s(&f, argv[1], "rb") != 0) f = NULL;
+#else
+    f = fopen(argv[1], "rb");
+#endif
     if (!f) {
         fprintf(stderr, "cannot open fixture: %s\n", argv[1]);
         return 2;

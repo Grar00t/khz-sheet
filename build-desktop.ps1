@@ -11,13 +11,13 @@ $DesktopProject = Join-Path $RepoRoot "src\KHZ.Sheet.Desktop\KHZ.Sheet.Desktop.c
 $DesktopOutput = Join-Path $RepoRoot "src\KHZ.Sheet.Desktop\bin\Release\net8.0-windows"
 
 cmake -S $RepoRoot -B $NativeBuildDir `
-    -DKHZ_ENABLE_LEDGER=OFF `
+    -DKHZ_ENABLE_LEDGER=AUTO `
     -DKHZ_BUILD_SELFTEST=OFF `
     -DKHZ_BUILD_TESTS=OFF `
     -DKHZ_BUILD_SHARED=ON
 
 cmake --build $NativeBuildDir --config Release --target khz_sheet_shared
-dotnet build $DesktopProject -c Release
+dotnet build $DesktopProject -c Release -warnaserror
 
 $NativeDll = Get-ChildItem -Path $NativeBuildDir -Recurse -Filter "khz_sheet.dll" |
     Sort-Object LastWriteTime -Descending |

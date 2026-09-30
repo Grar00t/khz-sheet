@@ -12,4 +12,12 @@ dotnet run --project $project -c Release
 dotnet run --project $project -c Release -- race (Resolve-Path build/desktop-native/Release/khz_sheet.dll).Path
 dotnet run --project $project -c Release -- bad-image
 ```
-No line/branch coverage percentage, exhaustive fuzz campaign, desktop UI automation, table/chart testing, locale-key validation, full OOXML conformance, or formal memory-safety proof is claimed. Existing `khz_fuzz_test` is a bounded malformed-input test, not evidence of sustained coverage-guided fuzzing.
+No line/branch coverage percentage, exhaustive fuzz campaign, locale-key validation, full OOXML conformance, or formal memory-safety proof is claimed. Existing `khz_fuzz_test` is a bounded malformed-input test, not evidence of sustained coverage-guided fuzzing.
+
+`khz_formula_extended_test` covers the added functions, comparisons, rounding boundaries, lazy branch evaluation and dependency recalculation. `khz_rational_oracle.py` adds independent Fraction checks for round/floor/ceiling. `khz_xlsx_resilience_test` also covers DTDs, malformed nesting/attributes/styles, dimensions and a truncated ZIP.
+
+`KhzSubsystemContracts` verifies style/layout/theme/table/chart round trips and rejected imports; exact managed/native formula parity; table totals/history/headers; native coordinate identity during sort; and real WPF sort/edit/error recovery, dimensions, theme bindings, chart rendering and automation descriptions. Set `KHZ_TEST_ARTIFACTS` to retain synthetic workbooks and PNG visual receipts; otherwise temporary artifacts are deleted.
+
+Run `scripts/verify-windows.ps1` and `scripts/verify-linux.sh` to collect command logs, exits, warning counts and CTest JUnit receipts. `dotnet test` is explicitly recorded but does not discover framework tests in these console projects. The assertion evidence comes from `dotnet run`.
+
+`tests/khz_presentation_oracle.py <retained-artifact-directory>` optionally reads nine synthetic exports using an already installed openpyxl and verifies styles, dimensions, tables, chart ranges/caches and theme metadata. This independent reader check is not a substitute for actual Excel/LibreOffice visual verification.

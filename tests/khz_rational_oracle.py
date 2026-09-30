@@ -18,6 +18,9 @@ def verify(path):
         fn.argtypes = [Rational, Rational, C.POINTER(Rational)]
         fn.restype = C.c_int
     lib.khz_rational_compare.argtypes = [Rational, Rational, C.POINTER(C.c_int)]
+    lib.khz_rational_round.argtypes = [Rational, C.c_int64, C.POINTER(Rational)]
+    for name in ['floor', 'ceiling']:
+        getattr(lib, 'khz_rational_' + name).argtypes = [Rational, C.POINTER(Rational)]
     lib.khz_simd_sum_i64.argtypes = [C.POINTER(C.c_int64), C.c_size_t, C.POINTER(C.c_int64)]
     lib.khz_simd_sum_scaled.argtypes = [C.POINTER(C.c_int64), C.c_size_t, C.c_int64, C.POINTER(Rational)]
     rng = random.Random(0x4B485A524154)
@@ -35,7 +38,7 @@ def verify(path):
         a = Fraction(rng.randint(-bound, bound), rng.randint(1, bound))
         b = Fraction(rng.randint(-bound, bound), rng.randint(1, bound))
         cases.append((a, b))
-    for a, b in cases:
+    for index, (a, b) in enumerate(cases):
         ca, cb = Rational(a.numerator, a.denominator), Rational(b.numerator, b.denominator)
         for name, result in [('add', a+b), ('sub', a-b), ('mul', a*b),
                              ('div', a/b if b else None)]:
@@ -52,6 +55,20 @@ def verify(path):
         order = C.c_int(71)
         check(lib.khz_rational_compare(ca, cb, C.byref(order)) == 0
               and order.value == ((a > b) - (a < b)), ('compare', a, b, order.value))
+        decimals = index % 37 - 18
+        scale = Fraction(10 ** decimals) if decimals >= 0 else Fraction(1, 10 ** -decimals)
+        scaled = abs(a * scale)
+        integer = (scaled.numerator * 2 + scaled.denominator) // (scaled.denominator * 2)
+        rounded = Fraction(integer if a >= 0 else -integer) / scale
+        for name, expected_value in [('round', rounded), ('floor', Fraction(a.numerator // a.denominator)),
+                                     ('ceiling', Fraction(-(-a.numerator // a.denominator)))]:
+            out = Rational(17, 19)
+            args = [ca, decimals, C.byref(out)] if name == 'round' else [ca, C.byref(out)]
+            status = getattr(lib, 'khz_rational_' + name)(*args)
+            expected_status = 0 if abs(expected_value.numerator) <= LIMIT and expected_value.denominator <= LIMIT else -7
+            check(status == expected_status, (name, a, decimals, status, expected_status))
+            pair = (expected_value.numerator, expected_value.denominator) if status == 0 else (17, 19)
+            check((out.num, out.den) == pair, (name, a, decimals, pair, out.num, out.den))
     extremes = [-LIMIT-1, -LIMIT, -1, 0, 1, LIMIT]
     for i in range(6000):
         values = [rng.choice(extremes) for _ in range(rng.randrange(65))]

@@ -262,7 +262,7 @@ KhzSheetStatus khz_formula_set(KhzSheet *sheet, uint32_t col, uint32_t row,
     size_t dep_mark;
     size_t target = (size_t)0;
     KhzCell *existing = NULL;
-    KhzCell previous;
+    KhzCell previous = {0};
     size_t old_count;
     uint32_t old_flags = 0;
 
@@ -503,7 +503,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
     for (i = (size_t)0; i < count; ++i) {
         KhzCell *cell;
-        KhzCell previous;
+        KhzCell previous = {0};
         KhzFormula formula;
         KhzFormulaResult result;
         int changed;

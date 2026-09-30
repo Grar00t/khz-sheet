@@ -320,7 +320,7 @@ static KhzSheetStatus khz_agg_integer_lane(KhzSheet *sheet, const KhzAgg *agg,
     if (!khz_agg_all_integer(agg)) {
         return KHZ_SHEET_OK;
     }
-    if (op == KHZ_FORMULA_AVG) {
+    if (op == KHZ_FORMULA_AVG || op == KHZ_FORMULA_PRODUCT) {
         /* The mean of integers is not an integer. It stays on the rational
            path so 1 and 2 average to 3/2. */
         return KHZ_SHEET_OK;
@@ -449,6 +449,11 @@ static KhzSheetStatus khz_eval_aggregate(KhzSheet *sheet, const KhzFormulaNode *
         switch ((KhzFormulaOp)node->op) {
         case KHZ_FORMULA_SUM:
             status = khz_simd_sum_rational(agg.values, agg.count, &value);
+            break;
+        case KHZ_FORMULA_PRODUCT:
+            value = khz_rational_one();
+            for (size_t k = 0; k < agg.count && status == KHZ_SHEET_OK; ++k)
+                status = khz_rational_mul(value, agg.values[k], &value);
             break;
         case KHZ_FORMULA_AVG:
             status = khz_simd_avg_rational(agg.values, agg.count, &value);
@@ -640,6 +645,43 @@ static KhzSheetStatus khz_eval_pow(KhzRational base, KhzRational exponent,
     return khz_result_value(out, value);
 }
 
+
+static int khz_count_cell(const KhzCell *cell, int all)
+{
+    if (!cell || cell->kind == KHZ_CELL_EMPTY) return 0;
+    if (all) return cell->kind != KHZ_CELL_TEXT || cell->text_len != 0;
+    return cell->kind == KHZ_CELL_RATIONAL ||
+        (cell->kind == KHZ_CELL_FORMULA && cell->error == KHZ_CELL_ERROR_NONE);
+}
+static KhzSheetStatus khz_eval_count(KhzSheet *sheet, const KhzFormulaNode *node,
+                                    size_t depth, KhzFormulaResult *out)
+{
+    int64_t count = 0;
+    int all = node->op == KHZ_FORMULA_COUNTA;
+    if (!node->children || !node->child_count || node->child_count > KHZ_FORMULA_MAX_ARGS)
+        return KHZ_SHEET_ERR_FORMAT;
+    for (uint32_t i = 0; i < node->child_count; ++i) {
+        const KhzFormulaNode *child = node->children[i];
+        if (!child) return KHZ_SHEET_ERR_FORMAT;
+        if (child->op == KHZ_FORMULA_RANGE) {
+            for (size_t j = 0; j < sheet->grid.cell_count; ++j)
+                if (khz_cell_in_node(&sheet->grid.cells[j], child))
+                    count += khz_count_cell(&sheet->grid.cells[j], all);
+        } else if (child->op == KHZ_FORMULA_REF) {
+            const KhzCell *cell = NULL;
+            KhzSheetStatus status = khz_sheet_get(sheet, child->col0, child->row0, &cell);
+            if (status != KHZ_SHEET_OK && status != KHZ_SHEET_ERR_MISSING) return status;
+            count += khz_count_cell(cell, all);
+        } else {
+            KhzFormulaResult result;
+            KhzSheetStatus status = khz_eval_node(sheet, child, depth, &result);
+            if (status != KHZ_SHEET_OK) return status;
+            if (khz_result_is_error(&result) && !all) { *out = result; return KHZ_SHEET_OK; }
+            ++count;
+        }
+    }
+    return khz_result_value(out, (KhzRational){count,1});
+}
 static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
                                     size_t depth, KhzFormulaResult *out)
 {
@@ -674,8 +716,31 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
     case KHZ_FORMULA_AVG:
     case KHZ_FORMULA_MIN:
     case KHZ_FORMULA_MAX:
+    case KHZ_FORMULA_PRODUCT:
         return khz_eval_aggregate(sheet, node, depth + (size_t)1, out);
 
+    case KHZ_FORMULA_COUNT:
+    case KHZ_FORMULA_COUNTA:
+        return khz_eval_count(sheet, node, depth + 1, out);
+    case KHZ_FORMULA_IF:
+        if (node->child_count != 3 || !node->children || !node->children[0]
+            || !node->children[1] || !node->children[2]) return KHZ_SHEET_ERR_FORMAT;
+        status = khz_eval_node(sheet, node->children[0], depth + 1, &left);
+        if (status != KHZ_SHEET_OK) return status;
+        if (khz_result_is_error(&left)) { *out = left; return KHZ_SHEET_OK; }
+        return khz_eval_node(sheet, node->children[left.value.num != 0 ? 1 : 2], depth + 1, out);
+    case KHZ_FORMULA_ABS:
+    case KHZ_FORMULA_CEILING:
+    case KHZ_FORMULA_FLOOR:
+        if (node->child_count != 1 || !node->children || !node->children[0]) return KHZ_SHEET_ERR_FORMAT;
+        status = khz_eval_node(sheet, node->children[0], depth + 1, &left);
+        if (status != KHZ_SHEET_OK) return status;
+        if (khz_result_is_error(&left)) { *out = left; return KHZ_SHEET_OK; }
+        if (node->op == KHZ_FORMULA_ABS) status = khz_rational_abs(left.value, &zero);
+        else if (node->op == KHZ_FORMULA_CEILING) status = khz_rational_ceiling(left.value, &zero);
+        else status = khz_rational_floor(left.value, &zero);
+        if (status != KHZ_SHEET_OK) return khz_result_error(out, khz_formula_status_to_error(status));
+        return khz_result_value(out, zero);
     case KHZ_FORMULA_NEG:
         if (node->child_count != 1u || node->children == NULL
             || node->children[0] == NULL) {
@@ -713,6 +778,13 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
     case KHZ_FORMULA_MUL:
     case KHZ_FORMULA_DIV:
     case KHZ_FORMULA_POW:
+    case KHZ_FORMULA_ROUND:
+    case KHZ_FORMULA_EQ:
+    case KHZ_FORMULA_NE:
+    case KHZ_FORMULA_LT:
+    case KHZ_FORMULA_LE:
+    case KHZ_FORMULA_GT:
+    case KHZ_FORMULA_GE:
         if (node->child_count != 2u || node->children == NULL
             || node->children[0] == NULL || node->children[1] == NULL) {
             return KHZ_SHEET_ERR_FORMAT;
@@ -735,6 +807,26 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
             return khz_result_error(out, (KhzCellError)right.error);
         }
 
+        if (node->op == KHZ_FORMULA_ROUND) {
+            if (right.value.den != 1) return khz_result_error(out, KHZ_CELL_ERROR_NUM);
+            status = khz_rational_round(left.value, right.value.num, &zero);
+            if (status != KHZ_SHEET_OK) return khz_result_error(out, khz_formula_status_to_error(status));
+            return khz_result_value(out, zero);
+        }
+        if (node->op >= KHZ_FORMULA_EQ && node->op <= KHZ_FORMULA_GE) {
+            int cmp = 0, truth = 0;
+            status = khz_rational_compare(left.value, right.value, &cmp);
+            if (status != KHZ_SHEET_OK) return status;
+            switch ((KhzFormulaOp)node->op) {
+            case KHZ_FORMULA_EQ: truth = cmp == 0; break;
+            case KHZ_FORMULA_NE: truth = cmp != 0; break;
+            case KHZ_FORMULA_LT: truth = cmp < 0; break;
+            case KHZ_FORMULA_LE: truth = cmp <= 0; break;
+            case KHZ_FORMULA_GT: truth = cmp > 0; break;
+            default: truth = cmp >= 0; break;
+            }
+            return khz_result_value(out, (KhzRational){truth,1});
+        }
         if (node->op == (uint32_t)KHZ_FORMULA_POW) {
             return khz_eval_pow(left.value, right.value, out);
         }

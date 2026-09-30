@@ -475,3 +475,42 @@ uint64_t khz_rational_hash(KhzRational a)
 
     return khz_fnv1a64(encoded, sizeof encoded);
 }
+
+KhzSheetStatus khz_rational_floor(KhzRational a, KhzRational *out)
+{
+    if (!out) return KHZ_SHEET_ERR_NULL;
+    if (!khz_rational_is_valid(a)) return KHZ_SHEET_ERR_FORMAT;
+    return khz_rational_make(a.num / a.den - (a.num < 0 && a.num % a.den != 0), 1, out);
+}
+KhzSheetStatus khz_rational_ceiling(KhzRational a, KhzRational *out)
+{
+    if (!out) return KHZ_SHEET_ERR_NULL;
+    if (!khz_rational_is_valid(a)) return KHZ_SHEET_ERR_FORMAT;
+    return khz_rational_make(a.num / a.den + (a.num > 0 && a.num % a.den != 0), 1, out);
+}
+KhzSheetStatus khz_rational_round(KhzRational a, int64_t decimals, KhzRational *out)
+{
+    uint64_t scale = 1, n, d;
+    KhzWide q, discard;
+    if (!out) return KHZ_SHEET_ERR_NULL;
+    if (!khz_rational_is_valid(a)) return KHZ_SHEET_ERR_FORMAT;
+    if (decimals < -18 || decimals > 18) return KHZ_SHEET_ERR_RANGE;
+    for (int64_t i = 0; i < (decimals < 0 ? -decimals : decimals); ++i) scale *= 10;
+    n = khz_wide_magnitude(a.num); d = (uint64_t)a.den;
+    if (decimals < 0) {
+        uint64_t whole = n / d / scale;
+        KhzWide divisor = khz_wide_mul(d, scale);
+        KhzWide rem = khz_wide_sub((KhzWide){0,n}, khz_wide_mul(d, whole * scale));
+        if (khz_wide_cmp(khz_wide_add(rem, rem), divisor) >= 0) ++whole;
+        if (whole > (uint64_t)INT64_MAX / scale) return KHZ_SHEET_ERR_OVERFLOW;
+        int64_t value = (int64_t)(whole * scale);
+        return khz_rational_make(a.num < 0 ? -value : value, 1, out);
+    }
+    uint64_t rem = khz_wide_div(khz_wide_mul(n, scale), d, &q);
+    if (rem >= (d / 2 + d % 2)) q = khz_wide_add(q, (KhzWide){0,1});
+    uint64_t g = khz_wide_gcd(khz_wide_div(q, scale, &discard), scale);
+    (void)khz_wide_div(q, g, &discard);
+    if (discard.hi || discard.lo > (uint64_t)INT64_MAX) return KHZ_SHEET_ERR_OVERFLOW;
+    int64_t value = (int64_t)discard.lo;
+    return khz_rational_make(a.num < 0 ? -value : value, (int64_t)(scale / g), out);
+}
