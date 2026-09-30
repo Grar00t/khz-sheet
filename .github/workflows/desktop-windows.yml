@@ -31,10 +31,11 @@ jobs:
       - name: Native tests on Windows
         shell: pwsh
         run: |
-          $env:CFLAGS = "/std:c11 /experimental:c11atomics"
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           cmake -S . -B build/windows-tests `
             -DKHZ_ENABLE_AVX2=OFF `
-            -DKHZ_ENABLE_LEDGER=OFF `
+            -DKHZ_ENABLE_LEDGER=AUTO `
             -DKHZ_BUILD_SELFTEST=ON `
             -DKHZ_BUILD_TESTS=ON `
             -DKHZ_BUILD_SHARED=OFF
@@ -48,6 +49,8 @@ jobs:
       - name: Managed integration tests against Windows DLL
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
           $NativeDll = Get-ChildItem -Path "build\desktop-native" -Recurse -Filter "khz_sheet.dll" |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
@@ -63,3 +66,5 @@ jobs:
           dotnet run --project tests/dotnet/KhzDependencyRewrite/KhzDependencyRewrite.csproj -c Release
           dotnet run --project tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj -c Release
           dotnet run --project tests/dotnet/KhzDesktopContracts/KhzDesktopContracts.csproj -c Release
+          dotnet run --project tests/dotnet/KhzBoundaryContracts/KhzBoundaryContracts.csproj -c Release
+          dotnet run --project tests/dotnet/KhzSubsystemContracts/KhzSubsystemContracts.csproj -c Release

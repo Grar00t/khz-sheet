@@ -6,6 +6,8 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using KHZ.Sheet.Core;
+using CellRange = KHZ.Sheet.Desktop.CellRange;
 
 namespace KHZ.Sheet.Desktop;
 
@@ -21,10 +23,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        EventManager.RegisterClassHandler(
-            typeof(DataGridCell), FrameworkElement.LoadedEvent,
-            new RoutedEventHandler(DataGridCell_Loaded));
+        SheetGrid.AddHandler(FrameworkElement.LoadedEvent, new RoutedEventHandler(DataGridCell_Loaded));
         InitializeFormattingControls();
+        ThemeBox.ItemsSource = SheetTheme.Presets; ThemeBox.DisplayMemberPath = nameof(SheetTheme.Name);
+        ChartKindBox.ItemsSource = Enum.GetValues<ChartKind>(); ChartKindBox.SelectedIndex = 1;
 
         SheetList.ItemsSource = _workbook.Sheets;
         SheetList.SelectedIndex = 0;
@@ -52,6 +54,9 @@ public partial class MainWindow : Window
         NumberFormatChoice[] numberFormats =
         [
             new("General", CellNumberFormat.General),
+            new("a/b", CellNumberFormat.Fraction),
+            new("USD", CellNumberFormat.Currency),
+            new("ISO date", CellNumberFormat.IsoDate),
             new("0", CellNumberFormat.Integer),
             new("0.00", CellNumberFormat.Decimal2),
             new("#,##0", CellNumberFormat.Thousands),
@@ -85,7 +90,11 @@ public partial class MainWindow : Window
         _rebinding = true;
         try
         {
+            SheetGrid.AutoGenerateColumns = true;
             SheetGrid.ItemsSource = sheet.Grid.DefaultView;
+            SheetGrid.FrozenColumnCount = sheet.FrozenColumns;
+            ThemeBox.SelectedItem = sheet.Theme;
+            ApplyThemeResources(sheet.Theme);
             SheetGrid.SelectedCells.Clear();
             SheetGrid.CurrentCell = new DataGridCellInfo();
             NameBox.Text = "A1";
@@ -276,6 +285,8 @@ public partial class MainWindow : Window
     {
         if (SheetGrid.Columns.Count == 0) return;
         SheetGrid.FrozenColumnCount = SheetGrid.FrozenColumnCount == 0 ? 1 : 0;
+        CurrentSheet?.SetFrozenColumns(SheetGrid.FrozenColumnCount);
+        RefreshRealizedCellStyles();
         SetStatus(SheetGrid.FrozenColumnCount == 0 ? "column A unfrozen" : "column A frozen");
     }
 
@@ -360,12 +371,15 @@ public partial class MainWindow : Window
 
     private void SheetGrid_LoadingRow(object sender, DataGridRowEventArgs e)
     {
-        e.Row.Header = (e.Row.GetIndex() + 1).ToString();
+        int index = CurrentSheet is not null && e.Row.Item is DataRowView v ? CurrentSheet.Grid.Rows.IndexOf(v.Row) : e.Row.GetIndex();
+        e.Row.Header = (index + 1).ToString();
+        e.Row.Height = CurrentSheet?.RowHeights.TryGetValue(index,out double height)==true ? height*96/72 : double.NaN;
     }
 
     private void SheetGrid_AutoGeneratingColumn(object sender, DataGridAutoGeneratingColumnEventArgs e)
     {
-        e.Column.Width = new DataGridLength(110);
+        int column = CurrentSheet?.Grid.Columns.IndexOf(e.PropertyName) ?? -1;
+        e.Column.Width = new DataGridLength(CurrentSheet?.ColumnWidths.TryGetValue(column,out double width)==true ? width*7+5 : 110);
         e.Column.CanUserSort = false;
         e.Column.CanUserReorder = false;
     }
@@ -379,6 +393,7 @@ public partial class MainWindow : Window
 
         UpdateFormulaBar();
         RefreshRealizedCellStyles();
+        UpdateHeaderSelection();
     }
 
     private void UpdateFormulaBar()
@@ -403,7 +418,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        int row = e.Row.GetIndex();
+        int row = e.Row.Item is DataRowView view ? sheet.Grid.Rows.IndexOf(view.Row) : -1;
+        if (row < 0) return;
         int column = e.Column.DisplayIndex;
         string value = editor.Text;
 
@@ -417,12 +433,13 @@ public partial class MainWindow : Window
                 }
                 else
                 {
+                    sheet.Grid.Rows[row][column] = sheet.RenderInput(row, column);
                     SetStatus($"cell {CellName(row, column)} · {message}");
                 }
 
                 FormulaBox.Text = sheet.GetInput(row, column);
                 RefreshEngineText();
-                SheetGrid.Items.Refresh();
+                RefreshRealizedCellStyles();
             }));
     }
 
@@ -618,7 +635,7 @@ public partial class MainWindow : Window
 
     private void RefreshCellStyles(WorksheetSession sheet)
     {
-        SheetGrid.Items.Refresh();
+        RefreshRealizedCellStyles();
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(RefreshRealizedCellStyles));
     }
 
@@ -630,7 +647,7 @@ public partial class MainWindow : Window
 
     private void DataGridCell_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is DataGridCell cell) ApplyCellVisualFormat(cell);
+        if (e.OriginalSource is DataGridCell cell) ApplyCellVisualFormat(cell);
     }
 
     private void ApplyCellVisualFormat(DataGridCell cell)
@@ -642,6 +659,9 @@ public partial class MainWindow : Window
         if (row < 0 || column < 0) return;
         string baseText = sheet.Grid.Rows[row][column]?.ToString() ?? string.Empty;
         CellVisualFormat.Apply(cell, sheet.GetEffectiveFormat(row, column), baseText);
+        if (SheetGrid.FrozenColumnCount > 0 && column == SheetGrid.FrozenColumnCount-1) {
+            cell.BorderBrush = (Brush)FindResource("AccentBrush"); cell.BorderThickness = new Thickness(0,0,3,0);
+        }
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root) where T : DependencyObject

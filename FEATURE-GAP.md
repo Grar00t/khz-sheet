@@ -5,7 +5,7 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 ## Verified or implemented in KHZ Sheet
 - Cell editing through the WPF grid and formula bar.
 - Multiple local worksheet tabs.
-- CSV open/save and bounded XLSX export.
+- CSV open/save and bounded single-sheet XLSX style/layout/table/chart import and export.
 - Native recalculation and proof verification/copy.
 - Clipboard paste and delete/clear.
 - Single-cell semantic Undo/Redo through the normal native commit path.
@@ -13,19 +13,19 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 - Toggle freeze of the first data column.
 - Desktop cell formatting: installed font families, preset sizes, bold/italic/underline, text/fill colors, alignment, wrapping, built-in number formats and borders.
 - Explicit formatting and visual table banding serialize to XLSX through `styles.xml` and per-cell style indexes; CSV remains unformatted.
-- Visual table styling for a rectangular selection with header and row banding; this is not a semantic Excel/Sheets table.
+- Visual styling plus semantic table ranges/headers/totals, three chart types and their bounded Open XML parts; see TABLES.md and CHARTS.md.
 - Undo/Redo includes cell-format and visual-table-style actions.
 
 ## High-value gaps
-- XLSX open in the desktop: native reader exists, but no managed reader binding currently exposes it safely.
+- General/multi-sheet XLSX open: only the canonical single-sheet presentation subset is imported.
 - Find/Replace: Find Next exists; replacement UI and grouped Replace All history are absent.
-- Sort/filter: absent. A naive DataView sort would break visual-row to native-coordinate identity, so it must not be enabled without a coordinate-preserving view model.
-- Row/column insert, delete, hide, group and resize persistence.
+- Filters and persistent/materialized or multi-key sorting: absent. Single-key semantic-table view sorting preserves native coordinates and has an actual sorted-edit regression.
+- Row/column insert, delete, hide and group. Width/height persistence is implemented.
 - Long-lived native edit churn: failed formula transactions rewind their arena bytes, but retired allocations from successful text/formula replacements remain reserved until the sheet is destroyed; there is no compaction/GC path yet.
 - Sheet rename/reorder/delete and workbook-level file format.
-- Formatting gaps: strikethrough, merge, conditional formatting, persisted row heights/column widths, and style import on XLSX open. Exported styles are currently limited to the implemented font/fill/border/alignment/wrap/built-in-number-format subset.
+- Formatting gaps: strikethrough, merge and conditional formatting. Supported explicit RGB styles and known number formats now import and export.
 - Data validation/drop-downs and conditional formatting.
-- Semantic tables (structured references, filter/sort/totals), charts, pivots, comments/notes and hyperlinks.
+- Structured references, table filters/resize/calculated columns, richer or multi-series charts, pivots, comments/notes and hyperlinks.
 - Broader formula families: logical, lookup/reference, text, date/time, statistical and array functions.
 - Print/page layout, import/export fidelity and general Excel workbook compatibility.
 - Autosave, version history, collaboration, protected ranges and sharing are not local-engine features today.

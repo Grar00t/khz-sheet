@@ -48,7 +48,8 @@ namespace KHZ.Sheet.Core
 				return SheetStatus.ErrNull;
 			}
 
-			State state = new State(tokens);
+			if (tokens.Count > 8192) return SheetStatus.ErrLimit;
+            State state = new State(tokens);
 
 			FormulaNode? node;
 			SheetStatus status = ParseExpression(state, 0, out node);
@@ -68,6 +69,15 @@ namespace KHZ.Sheet.Core
 		}
 
 		private static SheetStatus ParseExpression(State state, int minPrecedence, out FormulaNode? node)
+        {
+            node = null;
+            if (state.Depth >= 64) return SheetStatus.ErrLimit;
+            ++state.Depth;
+            try { return ParseExpressionCore(state, minPrecedence, out node); }
+            finally { --state.Depth; }
+        }
+
+        private static SheetStatus ParseExpressionCore(State state, int minPrecedence, out FormulaNode? node)
 		{
 			node = null;
 
@@ -157,6 +167,15 @@ namespace KHZ.Sheet.Core
 		}
 
 		private static SheetStatus ParseUnary(State state, out FormulaNode? node)
+        {
+            node = null;
+            if (state.Depth >= 64) return SheetStatus.ErrLimit;
+            ++state.Depth;
+            try { return ParseUnaryCore(state, out node); }
+            finally { --state.Depth; }
+        }
+
+        private static SheetStatus ParseUnaryCore(State state, out FormulaNode? node)
 		{
 			node = null;
 			state.SkipSpaces();
@@ -446,6 +465,7 @@ namespace KHZ.Sheet.Core
 
 		private sealed class State
 		{
+            public int Depth;
 			private readonly IReadOnlyList<FormulaToken> _tokens;
 
 			internal State(IReadOnlyList<FormulaToken> tokens)

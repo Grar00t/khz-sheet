@@ -69,7 +69,7 @@ public sealed class WorkbookSession : IDisposable
     }
 }
 
-public sealed class WorksheetSession : IDisposable
+public sealed partial class WorksheetSession : IDisposable
 {
     private const int DefaultRows = 256;
     private const int DefaultColumns = 52;
@@ -143,14 +143,16 @@ public sealed class WorksheetSession : IDisposable
             return input;
         }
 
-        return Grid.Rows[row][column]?.ToString() ?? string.Empty;
+        return string.Empty;
     }
 
     public bool CommitCell(int row, int column, string? input, out string message)
     {
         string before = GetInput(row, column);
         string after = input ?? string.Empty;
+        if (!ValidateTableEdit(row, column, after, out message)) return false;
         bool ok = CommitCellCore(row, column, after, out message);
+        if (ok) UpdateTableHeaders(row);
         if (ok && !string.Equals(before, after, StringComparison.Ordinal))
         {
             _undo.Push(new CellEdit(row, column, before, after));
@@ -169,10 +171,9 @@ public sealed class WorksheetSession : IDisposable
             return false;
         }
 
-        _inputs[Key(row, column)] = raw;
-
         if (!EngineAvailable)
         {
+            _inputs[Key(row, column)] = raw;
             Grid.Rows[row][column] = raw;
             message = EngineSummary;
             return true;
@@ -186,7 +187,6 @@ public sealed class WorksheetSession : IDisposable
             status = InstallFormula((uint)column, (uint)row, raw, out string formulaError);
             if (status != SheetStatus.Ok)
             {
-                Grid.Rows[row][column] = raw;
                 message = formulaError;
                 return false;
             }
@@ -194,9 +194,10 @@ public sealed class WorksheetSession : IDisposable
             status = _native!.TryRecalculate(out evaluated);
             if (status != SheetStatus.Ok)
             {
+                _inputs[Key(row,column)] = raw;
                 Grid.Rows[row][column] = raw;
-                message = SheetStatusText.Name(status);
-                return false;
+                message = "stored · recalculation " + SheetStatusText.Name(status);
+                return true;
             }
         }
         else
@@ -204,7 +205,6 @@ public sealed class WorksheetSession : IDisposable
             status = StoreLiteral((uint)column, (uint)row, raw);
             if (status != SheetStatus.Ok)
             {
-                Grid.Rows[row][column] = raw;
                 message = SheetStatusText.Name(status);
                 return false;
             }
@@ -212,12 +212,14 @@ public sealed class WorksheetSession : IDisposable
             status = _native!.TryRecalculate(out evaluated);
             if (status != SheetStatus.Ok && status != SheetStatus.ErrMissing)
             {
-                Grid.Rows[row][column] = raw;
-                message = SheetStatusText.Name(status);
-                return false;
+                _inputs[Key(row, column)] = raw;
+                RefreshComputedCells();
+                message = "stored · recalculation " + SheetStatusText.Name(status);
+                return true;
             }
         }
 
+        _inputs[Key(row, column)] = raw;
         RefreshComputedCells();
         message = evaluated == 0UL
             ? EngineSummary
@@ -267,13 +269,25 @@ public sealed class WorksheetSession : IDisposable
     {
         if (!InBounds(row, column)) return CellFormat.Empty;
 
-        CellFormat result = CellFormat.Empty;
+        CellFormat result = Theme is null ? CellFormat.Empty : new CellFormat(Foreground: Theme.Text, Background: Theme.Background);
         foreach (TableFormat table in _tableFormats)
         {
             if (table.Range.Contains(row, column))
                 result = result.Merge(table.FormatFor(row));
         }
 
+        foreach (TableDefinition table in Tables)
+        {
+            if (row < table.Range.TopLeft.Row || row > table.Range.BottomRight.Row ||
+                column < table.Range.TopLeft.Column || column > table.Range.BottomRight.Column) continue;
+            SheetTheme palette = Theme ?? SheetTheme.Presets[2];
+            bool header = row == table.Range.TopLeft.Row;
+            bool total = table.Totals && row == table.Range.BottomRight.Row;
+            result = result.Merge(new CellFormat(Bold: header || total,
+                Foreground: header ? (palette.Name == "High Contrast" ? "#000000" : "#FFFFFF") : palette.Text,
+                Background: header ? palette.Accent : ((row - table.Range.TopLeft.Row) % 2 == 1 ? palette.Band : palette.Background),
+                Border: palette.Grid, BorderThickness: 1));
+        }
         if (_formats.TryGetValue(Key(row, column), out CellFormat? explicitFormat))
             result = result.Merge(explicitFormat);
         return result;
@@ -281,6 +295,7 @@ public sealed class WorksheetSession : IDisposable
 
     public bool ApplyFormat(IEnumerable<(int Row, int Column)> cells, CellFormat overlay, out string message)
     {
+        if (!overlay.IsValid) { message = "invalid cell format"; return false; }
         List<FormatChange> changes = new();
         foreach ((int row, int column) in cells.Distinct())
         {
@@ -331,6 +346,10 @@ public sealed class WorksheetSession : IDisposable
     internal IReadOnlyList<CellPresentation> CapturePresentationCells()
     {
         HashSet<long> keys = new(_formats.Keys);
+        if (Theme is not null) keys.UnionWith(_inputs.Keys);
+        foreach (TableDefinition table in Tables)
+            for (int r = table.Range.TopLeft.Row; r <= table.Range.BottomRight.Row; ++r)
+            for (int c = table.Range.TopLeft.Column; c <= table.Range.BottomRight.Column; ++c) keys.Add(Key(r,c));
         foreach (TableFormat table in _tableFormats)
         {
             for (int row = table.Range.StartRow; row <= table.Range.EndRow; row++)
@@ -383,6 +402,7 @@ public sealed class WorksheetSession : IDisposable
             {
                 string value = undo ? cell.Before : cell.After;
                 if (!CommitCellCore(cell.Row, cell.Column, value, out message)) return false;
+                UpdateTableHeaders(cell.Row);
                 message = $"{(undo ? "undo" : "redo")} · {ColumnName(cell.Column)}{cell.Row + 1}";
                 return true;
             }
@@ -400,6 +420,10 @@ public sealed class WorksheetSession : IDisposable
                 else if (!_tableFormats.Any(x => x.Id == table.Table.Id)) _tableFormats.Add(table.Table);
                 message = $"{(undo ? "undo" : "redo")} table style";
                 return true;
+            case ObjectEdit obj:
+                return ApplyObjectHistory(obj, undo, out message);
+            case TableTotalsEdit totals:
+                return ApplyTotalsHistory(totals, undo, out message);
             default:
                 message = "unknown history entry";
                 return false;
@@ -513,10 +537,10 @@ public sealed class WorksheetSession : IDisposable
             IReadOnlyList<CellPresentation> presentation = CapturePresentationCells();
             string candidate = nativeTemp;
             string styleSummary = string.Empty;
-            if (presentation.Count > 0)
+            if (presentation.Count > 0 || HasWorkbookObjects)
             {
                 if (!XlsxPresentationSerializer.TryApply(
-                    nativeTemp, styledTemp, presentation, out styleSummary))
+                    nativeTemp, styledTemp, presentation, this, out styleSummary))
                 {
                     message = $"xlsx style export failed · {styleSummary}";
                     return false;
@@ -526,7 +550,7 @@ public sealed class WorksheetSession : IDisposable
 
             File.Move(candidate, fullPath, overwrite: true);
             long finalBytes = new FileInfo(fullPath).Length;
-            string styled = presentation.Count == 0 ? string.Empty : $" · {styleSummary}";
+            string styled = string.IsNullOrEmpty(styleSummary) ? string.Empty : $" · {styleSummary}";
             message = $"xlsx · {report.CellsWritten:N0} cells · {finalBytes:N0} bytes · lossy {report.LossyCells:N0}{styled}";
             return true;
         }
@@ -631,6 +655,9 @@ public sealed class WorksheetSession : IDisposable
         return true;
     }
 
+    internal string RenderInput(int row, int column) => RenderCell(row, column, GetInput(row, column));
+    public event EventHandler? ValuesChanged;
+
     public void RefreshComputedCells()
     {
         if (!EngineAvailable)
@@ -643,6 +670,7 @@ public sealed class WorksheetSession : IDisposable
             DecodeKey(pair.Key, out int row, out int column);
             Grid.Rows[row][column] = RenderCell(row, column, pair.Value);
         }
+        ValuesChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void Dispose()
@@ -696,6 +724,7 @@ public sealed class WorksheetSession : IDisposable
 
     private SheetStatus StoreLiteral(uint column, uint row, string raw)
     {
+        if (raw.StartsWith('\'')) return _native!.SetText(column, row, raw[1..]);
         string value = raw.Trim();
 
         if (value.Length == 0)

@@ -27,33 +27,12 @@ namespace KHZ.Sheet.Core
 		public abstract FormulaNodeKind Kind { get; }
 	}
 
-	/// <summary>
-	/// A numeric literal.
-	///
-	/// Value is a double, and that is the defect this class is being prepared
-	/// to fix. The C core stores an exact int64 rational, so 0.1 must reach it
-	/// as 1/10 - but a double cannot hold 0.1, and by the time the literal has
-	/// been through double the exact value the user typed is gone. Recovering
-	/// it afterwards is guesswork: KhzFormula.cs currently routes the double
-	/// through decimal to undo the rounding, which repairs the common cases and
-	/// cannot be correct in general, because it is reconstructing information
-	/// that was already destroyed.
-	///
-	/// RawText is the fix: the digits exactly as written, so the lowerer can
-	/// build num/den from the text and never consult the double at all. This
-	/// phase only carries the text; nothing reads it yet.
-	///
-	/// Additive on purpose. The one-argument constructor is unchanged and
-	/// FormulaParser.cs is untouched, so every existing call site still
-	/// compiles and still produces a node whose RawText is null.
-	/// </summary>
+    /// <summary>A numeric literal with its exact source spelling. Evaluation
+    /// requires RawText; Value is retained only for syntax tooling compatibility.</summary>
 	public sealed class NumberNode : FormulaNode
 	{
-		/// <summary>
-		/// The pre-Phase-96 form. Kept so the existing parser compiles
-		/// unchanged. A node built this way has no exact text and HasRawText is
-		/// false - which is the honest report, not a defect to be hidden.
-		/// </summary>
+        /// <summary>Legacy syntax-only constructor. Exact native lowering refuses
+        /// nodes without source text, rather than guessing decimal intent.</summary>
 		public NumberNode(double value)
 		{
 			Value = value;
@@ -81,23 +60,8 @@ namespace KHZ.Sheet.Core
 		/// </summary>
 		public double Value { get; }
 
-		/// <summary>
-		/// The literal exactly as it appeared in the formula, or null when this
-		/// node was built without it.
-		///
-		/// Nullable, deliberately, and not `required`. Null is the ordinary case
-		/// right now - FormulaParser.cs still uses the one-argument constructor
-		/// everywhere, so every node in a parsed tree has RawText null today.
-		/// Marking it required would force call sites to supply text that does
-		/// not exist yet and turn an accurate absence into a compile error.
-		///
-		/// Declaring it non-nullable was the actual bug (CS8618, CS8625,
-		/// CS8601): it told the compiler this can never be null while both
-		/// constructors can set it to null, which would have suppressed exactly
-		/// the null check the exact-rational path depends on. A consumer must
-		/// ask before reading, and `string?` is what makes the compiler enforce
-		/// that.
-		/// </summary>
+        /// <summary>Original digits, or null for a legacy syntax-only node.
+        /// FormulaParser supplies this text without floating-point reconstruction.</summary>
 		public string? RawText { get; }
 
 		/// <summary>

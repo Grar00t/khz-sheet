@@ -55,7 +55,12 @@ static void fail(const char *what, const char *detail)
 
 static unsigned char *read_whole_file(const char *path, size_t *out_size)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f = NULL;
+#if defined(_MSC_VER)
+    if (fopen_s(&f, path, "rb") != 0) f = NULL;
+#else
+    f = fopen(path, "rb");
+#endif
     if (!f) {
         return NULL;
     }

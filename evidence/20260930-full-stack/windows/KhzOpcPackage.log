@@ -1,0 +1,27 @@
+OPC payload fidelity:
+  OK   open package
+  OK   content types present
+  OK   four carried parts
+  OK   directory and duplicate reported
+  OK   directory entry reported
+  OK   duplicate entry reported
+  OK   opaque payload retained on open
+  OK   first duplicate retained deterministically
+  OK   replace workbook payload
+  OK   replacement bytes are package-owned
+  OK   add styles part
+  OK   duplicate add refused
+  OK   added bytes are package-owned
+  OK   save package
+  OK   reopen saved package
+  OK   saved container has no hidden drops
+  OK   part order/count includes added part
+  OK   added styles payload preserved
+  OK   untouched content-types payload byte-identical
+  OK   untouched opaque payload byte-identical
+  OK   retained duplicate payload byte-identical
+  OK   only requested payload changed
+OPC invalid carried part:
+  OK   open package containing empty part
+  OK   empty part refused at save boundary
+ALL PASS failures=0

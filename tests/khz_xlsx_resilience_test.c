@@ -26,7 +26,7 @@ static const char sheet_xml[] =
     "<x:c><x:v>not-a-number</x:v></x:c>"
     "<x:c><x:v>99999999999999999999</x:v></x:c>"
     "<x:c t=\"e\"><x:v>#N/A</x:v></x:c>"
-    "<x:c><x:f>IF(A1,1,0)</x:f></x:c>"
+    "<x:c><x:f>ZZ(A1,1,0)</x:f></x:c>"
     "<x:c><x:v>0.33333333333333331</x:v></x:c>"
     "</x:row>"
     "<x:row>"
@@ -104,7 +104,7 @@ int main(void)
 
     CHECK(khz_sheet_get(&sheet, 4u, 1u, &cell) == KHZ_SHEET_OK);
     CHECK(cell != NULL && cell->kind == (uint32_t)KHZ_CELL_FORMULA);    CHECK(cell != NULL && cell->formula_len == 10u
-          && memcmp(cell->formula, "IF(A1,1,0)", 10u) == 0);
+          && memcmp(cell->formula, "ZZ(A1,1,0)", 10u) == 0);
 
     CHECK(khz_sheet_get(&sheet, 5u, 1u, &cell) == KHZ_SHEET_OK);
     CHECK(cell != NULL && cell->kind == (uint32_t)KHZ_CELL_RATIONAL);
@@ -134,7 +134,7 @@ int main(void)
     CHECK(cell != NULL && cell->kind == (uint32_t)KHZ_CELL_FORMULA
           && cell->error == (uint32_t)KHZ_CELL_ERROR_NAME);
     CHECK(cell != NULL && cell->formula_len == 10u
-          && memcmp(cell->formula, "IF(A1,1,0)", 10u) == 0);
+          && memcmp(cell->formula, "ZZ(A1,1,0)", 10u) == 0);
 
     CHECK(khz_sheet_get(&sheet, 1u, 3u, &cell) == KHZ_SHEET_OK);
     CHECK(cell != NULL && cell->kind == (uint32_t)KHZ_CELL_FORMULA
@@ -142,6 +142,40 @@ int main(void)
     CHECK(cell != NULL && cell->value.num == 3 && cell->value.den == 1);
     CHECK(khz_sheet_verify_chain(&sheet, NULL) == KHZ_SHEET_OK);
 
+    {
+        static const char *bad[] = {
+            "<worksheet><sheetData></worksheet>",
+            "<wrongRoot><sheetData/></wrongRoot>",
+            "<worksheet><sheetData><row r=1/></sheetData></worksheet>",
+            "<worksheet><sheetData><row r=\"1\" r=\"2\"/></sheetData></worksheet>",
+            "<worksheet><sheetData></sheetData invalid></worksheet>",
+            "<!DOCTYPE worksheet><worksheet/>",
+            "<worksheet><sheetData><row r=\"1048577\"/></sheetData></worksheet>",
+            "<worksheet><sheetData><row r=\"1\"><c r=\"XFE1\"><v>1</v></c></row></sheetData></worksheet>"
+        };
+        for (size_t k = 0; k < sizeof bad / sizeof bad[0]; ++k) {
+            size_t count = sheet.grid.cell_count;
+            entries[1].data = (const unsigned char *)bad[k]; entries[1].size = strlen(bad[k]);
+            CHECK(khz_xlsx_reader_parse_sheet(&reader,&sheet,entries[1].name) != KHZ_SHEET_OK);
+            CHECK(sheet.grid.cell_count == count);
+        }
+        char nested[1024] = "<worksheet>"; size_t pos = strlen(nested);
+        for (int k=0;k<70;++k) {memcpy(nested+pos,"<a>",3);pos+=3;}
+        for (int k=0;k<70;++k) {memcpy(nested+pos,"</a>",4);pos+=4;}
+        memcpy(nested+pos,"</worksheet>",13);
+        entries[1].data=(const unsigned char *)nested;entries[1].size=strlen(nested);
+        CHECK(khz_xlsx_reader_parse_sheet(&reader,&sheet,entries[1].name)==KHZ_SHEET_ERR_LIMIT);
+        entries[1].name="xl/styles.xml";entries[1].name_len=strlen(entries[1].name);
+        entries[1].data=(const unsigned char *)"<styleSheet><fonts></styleSheet>";
+        entries[1].size=strlen((const char *)entries[1].data);
+        CHECK(khz_xlsx_reader_check_package(&reader)==KHZ_SHEET_ERR_FORMAT);
+    }
+    {
+        KhzXlsxReader bad_reader;
+        const unsigned char bad_zip[] = {'P','K',3,4,0,0,0,0};
+        CHECK(khz_xlsx_reader_init(&bad_reader,&reader_arena)==KHZ_SHEET_OK);
+        CHECK(khz_xlsx_reader_load(&bad_reader,bad_zip,sizeof bad_zip)==KHZ_SHEET_ERR_FORMAT);
+    }
     khz_sheet_destroy(&sheet);
     khz_arena_destroy(&reader_arena);
     printf("checks=%d failures=%d\n", checks, failures);

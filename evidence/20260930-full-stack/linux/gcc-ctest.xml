@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="18"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="5"
+	timestamp="2026-09-30T22:36:36"
+	>
+	<testcase name="khz_selftest" classname="khz_selftest" time="0.0021883" status="run">
+		<properties/>
+		<system-out>abi=96 kernel=SCALAR lanes=1 ledger=1 xlsx=1 reader=1 ranges=1 inflate=1 inflate_failures=0 failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_sheet_failure_test" classname="khz_sheet_failure_test" time="0.0014955" status="run">
+		<properties/>
+		<system-out>ALL PASS failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_sheet_proof_tamper_test" classname="khz_sheet_proof_tamper_test" time="0.0014677" status="run">
+		<properties/>
+		<system-out>ALL PASS failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_xlsx_writer_test" classname="khz_xlsx_writer_test" time="0.0015581" status="run">
+		<properties/>
+		<system-out>ALL PASS failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_ledger_integrity_test" classname="khz_ledger_integrity_test" time="0.0059047" status="run">
+		<properties/>
+		<system-out>ALL PASS failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_xlsx_test" classname="khz_xlsx_test" time="0.0128794" status="run">
+		<properties/>
+		<system-out>fixture     = {linux-build}/gcc/khz_fixture.xlsx (2201 bytes)
+read        = OK
+entries     = 5
+report      = entries=5 cells_seen=200 loaded=200 unsupported=0 crc_failures=0
+cells       = 200 (expect 200)
+sum         = OK 26700/1 counted=200 (expect 26700/1 over 200)
+avg         = OK 267/2 counted=200
+chain       = OK failed_index=0 commits=200
+audit       = examined=200 verified=200 superseded=0 dropped=0
+proof       = b7e295b1430eb825947b207f9174b725d87e1377fd9e31502f763958775c3357
+arena       = used=17578010 peak=17579648 rejections=0 kernel=SCALAR lanes=1
+reset       = ERR_STATE (shared sheet arena)
+ALL PASS failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_xlsx_cd_size_test" classname="khz_xlsx_cd_size_test" time="0.0015707" status="run">
+		<properties/>
+		<system-out>ALL PASS strict central-directory and EOCD framing checks
+</system-out>
+	</testcase>
+	<testcase name="khz_fuzz_test" classname="khz_fuzz_test" time="4.73521" status="run">
+		<properties/>
+		<system-out>fixture     = {linux-build}/gcc/khz_fixture.xlsx (2201 bytes)
+baseline    = OK
+cases       = 789 (accepted=26 rejected=763)
+ALL PASS defects=0
+</system-out>
+	</testcase>
+	<testcase name="khz_formula_boundary_test" classname="khz_formula_boundary_test" time="0.0014463" status="run">
+		<properties/>
+		<system-out>checks=23 failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_numeric_boundary_test" classname="khz_numeric_boundary_test" time="0.0434102" status="run">
+		<properties/>
+		<system-out>checks=170021 failures=0 kernel=SCALAR
+</system-out>
+	</testcase>
+	<testcase name="khz_formula_transaction_test" classname="khz_formula_transaction_test" time="0.0017097" status="run">
+		<properties/>
+		<system-out>checks=26 failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_dependency_retry_test" classname="khz_dependency_retry_test" time="0.0014988" status="run">
+		<properties/>
+		<system-out>checks=21 failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_zip_boundary_test" classname="khz_zip_boundary_test" time="0.0069084" status="run">
+		<properties/>
+		<system-out>PASS valid stored entries status=0 expected=0
+PASS local CRC conflict status=-3 expected=-3
+PASS local size conflict status=-3 expected=-3
+PASS local flags conflict status=-3 expected=-3
+PASS encryption unsupported status=-6 expected=-6
+PASS member on another disk status=-6 expected=-6
+PASS duplicate member status=-3 expected=-3
+PASS ASCII case collision status=-3 expected=-3
+PASS shared local record status=-3 expected=-3
+PASS parent path status=-3 expected=-3
+PASS embedded NUL status=-3 expected=-3
+PASS backslash ambiguity status=-3 expected=-3
+PASS overlapping different members status=-3 expected=-3
+PASS compression ratio ceiling before decode status=-4 expected=-4
+PASS unsigned descriptor status=0 expected=0
+PASS conflicting descriptor status=-3 expected=-3
+PASS signed descriptor status=0 expected=0
+PASS conflicting descriptor status=-3 expected=-3
+failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_recalc_property_test" classname="khz_recalc_property_test" time="0.167327" status="run">
+		<properties/>
+		<system-out>workbooks=100 mutations=2000 checks=279000 failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_rational_oracle" classname="khz_rational_oracle" time="0.720335" status="run">
+		<properties/>
+		<system-out>{"library": "libkhz_sheet.so", "seed": "4B485A524154", "checks": 204090, "failures": 0}
+</system-out>
+	</testcase>
+	<testcase name="khz_xlsx_formula_cache_test" classname="khz_xlsx_formula_cache_test" time="0.0017266" status="run">
+		<properties/>
+		<system-out>checks=36 failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_xlsx_resilience_test" classname="khz_xlsx_resilience_test" time="0.0016906" status="run">
+		<properties/>
+		<system-out>checks=70 failures=0
+</system-out>
+	</testcase>
+	<testcase name="khz_formula_extended_test" classname="khz_formula_extended_test" time="0.002572" status="run">
+		<properties/>
+		<system-out>checks=12089 failures=0
+</system-out>
+	</testcase>
+</testsuite>

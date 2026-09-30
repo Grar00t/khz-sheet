@@ -1,0 +1,217 @@
+ARTIFACTS={repo}\build\evidence-windows\ui\khz-subsystems-13797c58f3504d7aa5bacacb62dc00a7
+PASS native available
+PASS edit 0,0 native ┬╖ exact ┬╖ cells 1 ┬╖ commits 1
+PASS edit 0,1 native ┬╖ exact ┬╖ cells 2 ┬╖ commits 2
+PASS edit 1,0 native ┬╖ exact ┬╖ cells 3 ┬╖ commits 3
+PASS edit 1,1 native ┬╖ exact ┬╖ cells 4 ┬╖ commits 4
+PASS edit 2,0 native ┬╖ exact ┬╖ cells 5 ┬╖ commits 5
+PASS edit 2,1 native ┬╖ exact ┬╖ cells 6 ┬╖ commits 6
+PASS edit 3,0 native ┬╖ exact ┬╖ cells 7 ┬╖ commits 7
+PASS edit 3,1 recalculated 1 ┬╖ native ┬╖ exact ┬╖ cells 8 ┬╖ commits 9
+PASS edit 6,2 recalculated 1 ┬╖ native ┬╖ exact ┬╖ cells 9 ┬╖ commits 11
+PASS failed edit refused
+PASS failed edit preserves input
+PASS dimensions accepted
+PASS bad dimensions refused
+PASS format with independent borders
+PASS invalid RGB rejected atomically
+PASS semantic table
+PASS overlapping table refused
+PASS proof before sort
+PASS exact numeric sort view
+PASS sorting preserves native proof and coordinates
+PASS edit 3,1 recalculated 2 ┬╖ native ┬╖ exact ┬╖ cells 9 ┬╖ commits 14
+PASS sorted-row edit updates native DAG
+PASS Bar chart model
+PASS Column chart model
+PASS Line chart model
+PASS chart reads native evaluated rational
+PASS export Classic Light xlsx ┬╖ 9 cells ┬╖ 7,544 bytes ┬╖ lossy 2 ┬╖ styles ┬╖ 9 cells
+PASS import Classic Light xlsx ┬╖ 9 cells ┬╖ styles/layout/tables/charts imported
+PASS theme and dimensions round-trip
+PASS style round-trip
+PASS table and chart relationships round-trip
+PASS Unicode and formula recalculation round-trip
+PASS re-export imported presentation
+PASS export Monochromatic Dark xlsx ┬╖ 9 cells ┬╖ 7,529 bytes ┬╖ lossy 2 ┬╖ styles ┬╖ 9 cells
+PASS import Monochromatic Dark xlsx ┬╖ 9 cells ┬╖ styles/layout/tables/charts imported
+PASS theme and dimensions round-trip
+PASS style round-trip
+PASS table and chart relationships round-trip
+PASS Unicode and formula recalculation round-trip
+PASS re-export imported presentation
+PASS export Corporate Blue xlsx ┬╖ 9 cells ┬╖ 7,543 bytes ┬╖ lossy 2 ┬╖ styles ┬╖ 9 cells
+PASS import Corporate Blue xlsx ┬╖ 9 cells ┬╖ styles/layout/tables/charts imported
+PASS theme and dimensions round-trip
+PASS style round-trip
+PASS table and chart relationships round-trip
+PASS Unicode and formula recalculation round-trip
+PASS re-export imported presentation
+PASS export High Contrast xlsx ┬╖ 9 cells ┬╖ 7,516 bytes ┬╖ lossy 2 ┬╖ styles ┬╖ 9 cells
+PASS import High Contrast xlsx ┬╖ 9 cells ┬╖ styles/layout/tables/charts imported
+PASS theme and dimensions round-trip
+PASS style round-trip
+PASS table and chart relationships round-trip
+PASS Unicode and formula recalculation round-trip
+PASS re-export imported presentation
+PASS duplicate table header refused
+PASS edit 0,1 native ┬╖ exact ┬╖ cells 9 ┬╖ commits 15
+PASS header edit updates table metadata
+PASS header undo updates table metadata
+PASS edit 0,0 native ┬╖ exact ┬╖ cells 1 ┬╖ commits 1
+PASS edit 0,1 native ┬╖ exact ┬╖ cells 2 ┬╖ commits 2
+PASS edit 1,0 native ┬╖ exact ┬╖ cells 3 ┬╖ commits 3
+PASS edit 1,1 recalculated 1 ┬╖ native ┬╖ exact ┬╖ cells 4 ┬╖ commits 5
+PASS edit 2,0 native ┬╖ exact ┬╖ cells 5 ┬╖ commits 6
+PASS edit 2,1 recalculated 1 ┬╖ native ┬╖ exact ┬╖ cells 6 ┬╖ commits 8
+PASS automatic exact totals
+PASS native SUM total
+PASS table and total undo together
+PASS table and total redo together
+PASS export totals
+PASS import total semantics
+PASS computed total cannot be overwritten
+PASS edit 2,1 recalculated 2 ┬╖ native ┬╖ exact ┬╖ cells 8 ┬╖ commits 14
+PASS total recalculates after data edit
+PASS reject style index
+PASS failed import retains workbook style index
+PASS failed import preserves native proof style index
+PASS reject bad RGB
+PASS failed import retains workbook bad RGB
+PASS failed import preserves native proof bad RGB
+PASS reject invalid surrogate
+PASS failed import retains workbook invalid surrogate
+PASS failed import preserves native proof invalid surrogate
+PASS reject wide columns
+PASS failed import retains workbook wide columns
+PASS failed import preserves native proof wide columns
+PASS reject DTD
+PASS failed import retains workbook DTD
+PASS failed import preserves native proof DTD
+PASS reject depth
+PASS failed import retains workbook depth
+PASS failed import preserves native proof depth
+PASS reject cycle
+PASS failed import retains workbook cycle
+PASS failed import preserves native proof cycle
+PASS reject unsupported merge
+PASS failed import retains workbook unsupported merge
+PASS failed import preserves native proof unsupported merge
+PASS reject cross-sheet chart
+PASS failed import retains workbook cross-sheet chart
+PASS failed import preserves native proof cross-sheet chart
+PASS reject macro content type
+PASS failed import retains workbook macro content type
+PASS failed import preserves native proof macro content type
+PASS reject invalid alignment
+PASS failed import retains workbook invalid alignment
+PASS failed import preserves native proof invalid alignment
+PASS reject missing font table
+PASS failed import retains workbook missing font table
+PASS failed import preserves native proof missing font table
+PASS malformed ZIP refused
+PASS oversize compressed member refused
+PASS formula parity sheet
+PASS unannotated float refused
+PASS managed nesting limit
+PASS managed source limit
+PASS managed parse COUNT(A1:A4)
+PASS managed lower COUNT(A1:A4)
+PASS native parse/recalc COUNT(A1:A4)
+PASS numeric parity COUNT(A1:A4)
+PASS managed parse COUNTA(A1:A4)
+PASS managed lower COUNTA(A1:A4)
+PASS native parse/recalc COUNTA(A1:A4)
+PASS numeric parity COUNTA(A1:A4)
+PASS managed parse PRODUCT(A1:A2)
+PASS managed lower PRODUCT(A1:A2)
+PASS native parse/recalc PRODUCT(A1:A2)
+PASS numeric parity PRODUCT(A1:A2)
+PASS managed parse ABS(-1/3)
+PASS managed lower ABS(-1/3)
+PASS native parse/recalc ABS(-1/3)
+PASS numeric parity ABS(-1/3)
+PASS managed parse ROUND(1.005,2)
+PASS managed lower ROUND(1.005,2)
+PASS native parse/recalc ROUND(1.005,2)
+PASS numeric parity ROUND(1.005,2)
+PASS managed parse ROUND(-150,-2)
+PASS managed lower ROUND(-150,-2)
+PASS native parse/recalc ROUND(-150,-2)
+PASS numeric parity ROUND(-150,-2)
+PASS managed parse CEILING(-3/2)
+PASS managed lower CEILING(-3/2)
+PASS native parse/recalc CEILING(-3/2)
+PASS numeric parity CEILING(-3/2)
+PASS managed parse FLOOR(-3/2)
+PASS managed lower FLOOR(-3/2)
+PASS native parse/recalc FLOOR(-3/2)
+PASS numeric parity FLOOR(-3/2)
+PASS managed parse IF(A1<3,7/9,1/0)
+PASS managed lower IF(A1<3,7/9,1/0)
+PASS native parse/recalc IF(A1<3,7/9,1/0)
+PASS numeric parity IF(A1<3,7/9,1/0)
+PASS managed parse IF(FALSE,1/0,2)
+PASS managed lower IF(FALSE,1/0,2)
+PASS native parse/recalc IF(FALSE,1/0,2)
+PASS numeric parity IF(FALSE,1/0,2)
+PASS managed parse 1+2=3
+PASS managed lower 1+2=3
+PASS native parse/recalc 1+2=3
+PASS numeric parity 1+2=3
+PASS managed parse 1<>2
+PASS managed lower 1<>2
+PASS native parse/recalc 1<>2
+PASS numeric parity 1<>2
+PASS managed parse 2<=2
+PASS managed lower 2<=2
+PASS native parse/recalc 2<=2
+PASS numeric parity 2<=2
+PASS managed parse 3>2
+PASS managed lower 3>2
+PASS native parse/recalc 3>2
+PASS numeric parity 3>2
+PASS managed parse 3>=4
+PASS managed lower 3>=4
+PASS native parse/recalc 3>=4
+PASS numeric parity 3>=4
+PASS sort retains editable table descriptors
+PASS actual sort button retains coordinates
+PASS begin actual grid edit
+PASS sorted grid edit hits native row
+PASS begin actual grid edit
+PASS rejected UI edit restores displayed value
+PASS column resize captured in XLSX width units
+PASS row height control targets native row
+PASS formula bar highlighting executes
+PASS theme switch interaction
+PASS theme binding Classic Light
+PASS theme picker displays its name Classic Light
+PASS accent button text contrast Verify Proof Classic Light
+PASS accent button text contrast Apply Classic Light
+PASS render ui-Classic_Light.png
+PASS theme binding Monochromatic Dark
+PASS theme picker displays its name Monochromatic Dark
+PASS accent button text contrast Verify Proof Monochromatic Dark
+PASS accent button text contrast Apply Monochromatic Dark
+PASS render ui-Monochromatic_Dark.png
+PASS theme binding Corporate Blue
+PASS theme picker displays its name Corporate Blue
+PASS accent button text contrast Verify Proof Corporate Blue
+PASS accent button text contrast Apply Corporate Blue
+PASS render ui-Corporate_Blue.png
+PASS theme binding High Contrast
+PASS theme picker displays its name High Contrast
+PASS accent button text contrast Verify Proof High Contrast
+PASS accent button text contrast Apply High Contrast
+PASS render ui-High_Contrast.png
+PASS minimum window keeps grid usable
+PASS render ui-minimum.png
+PASS theme dropdown template opens and renders options
+PASS render Bar.png
+PASS Bar accessible exact values
+PASS render Column.png
+PASS Column accessible exact values
+PASS render Line.png
+PASS Line accessible exact values
+checks=215 failures=0

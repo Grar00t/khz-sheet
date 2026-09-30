@@ -487,6 +487,92 @@ static KhzSheetStatus khz_xlsx_parse_number(const char *text, size_t len, KhzRat
 	return khz_xlsx_apply_exponent(value, exponent_negative, exponent, out);
 }
 
+/* Preflight before allocating strings or mutating cells. Bounded stack, linear
+   scan; DTD/entity declarations are never part of this supported XML subset. */
+static KhzSheetStatus khz_xml_preflight(const unsigned char *bytes, size_t size, const char *root_name)
+{
+    if (bytes == NULL || size == 0) return KHZ_SHEET_ERR_FORMAT;
+    const char *p = (const char *)bytes, *end = p + size;
+    const char *names[64]; size_t lengths[64], depth = 0, elements = 0;
+    int roots = 0;
+    if (size >= 3 && bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf) p += 3;
+    while (p < end) {
+        if (*p != '<') {
+            if (depth == 0 && *p != ' ' && *p != '\r' && *p != '\n' && *p != '\t') return KHZ_SHEET_ERR_FORMAT;
+            ++p; continue;
+        }
+        const char *close = NULL;
+        if ((size_t)(end-p) >= 4 && memcmp(p,"<!--",4) == 0) {
+            for (const char *q = p+4; end-q >= 3; ++q) if (memcmp(q,"-->",3) == 0) {close=q+3;break;}
+        } else if ((size_t)(end-p) >= 9 && memcmp(p,"<![CDATA[",9) == 0) {
+            if (depth == 0) return KHZ_SHEET_ERR_FORMAT;
+            for (const char *q = p+9; end-q >= 3; ++q) if (memcmp(q,"]]>",3) == 0) {close=q+3;break;}
+        } else if (end-p >= 2 && p[1] == '?') {
+            for (const char *q = p+2; end-q >= 2; ++q) if (memcmp(q,"?>",2) == 0) {close=q+2;break;}
+        } else if (end-p >= 2 && p[1] == '!') return KHZ_SHEET_ERR_UNSUPPORTED;
+        else {
+            int closing = end-p >= 2 && p[1] == '/';
+            const char *name = p+1+closing, *q=name;
+            while (q < end && ((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z') ||
+                    (*q >= '0' && *q <= '9') || *q == ':' || *q == '_' || *q == '-' || *q == '.')) ++q;
+            size_t n = (size_t)(q-name);
+            if (n == 0 || n > 128) return KHZ_SHEET_ERR_FORMAT;
+            if (!((*name >= 'A' && *name <= 'Z') || (*name >= 'a' && *name <= 'z') || *name == '_' || *name == ':'))
+                return KHZ_SHEET_ERR_FORMAT;
+            if (!closing && depth == 0 && root_name != NULL) {
+                const char *local = name;
+                for (const char *part = name; part < q; ++part) if (*part == ':') local = part+1;
+                if ((size_t)(q-local) != strlen(root_name) || memcmp(local,root_name,strlen(root_name)) != 0)
+                    return KHZ_SHEET_ERR_FORMAT;
+            }
+            const char *attrs[64]; size_t attr_lens[64], attr_count = 0;
+            int empty = 0;
+            while (q < end) {
+                int spaced = khz_xml_is_space(*q);
+                while (q < end && khz_xml_is_space(*q)) ++q;
+                if (q == end) return KHZ_SHEET_ERR_FORMAT;
+                if (*q == '>') break;
+                if (*q == '/' && q+1 < end && q[1] == '>') { empty=1; ++q; break; }
+                if (closing || !spaced) return KHZ_SHEET_ERR_FORMAT;
+                const char *attr = q;
+                while (q < end && ((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z') ||
+                       (*q >= '0' && *q <= '9') || *q == ':' || *q == '_' || *q == '-' || *q == '.')) ++q;
+                size_t attr_len = (size_t)(q-attr);
+                if (attr_len == 0 || attr_len > 128) return KHZ_SHEET_ERR_FORMAT;
+                if (attr_count == 64) return KHZ_SHEET_ERR_LIMIT;
+                for (size_t i=0; i<attr_count; ++i)
+                    if (attr_lens[i] == attr_len && memcmp(attrs[i],attr,attr_len) == 0) return KHZ_SHEET_ERR_FORMAT;
+                attrs[attr_count]=attr; attr_lens[attr_count++]=attr_len;
+                while (q < end && khz_xml_is_space(*q)) ++q;
+                if (q == end || *q++ != '=') return KHZ_SHEET_ERR_FORMAT;
+                while (q < end && khz_xml_is_space(*q)) ++q;
+                if (q == end || (*q != '\'' && *q != '"')) return KHZ_SHEET_ERR_FORMAT;
+                char quote = *q++;
+                while (q < end && *q != quote) {
+                    if (*q == '<' || (unsigned char)*q < 0x20u) return KHZ_SHEET_ERR_FORMAT;
+                    ++q;
+                }
+                if (q == end) return KHZ_SHEET_ERR_FORMAT;
+                ++q;
+            }
+            if (q == end) return KHZ_SHEET_ERR_FORMAT;
+            if (closing) {
+                if (empty || depth == 0 || lengths[depth-1] != n || memcmp(names[depth-1],name,n) != 0) return KHZ_SHEET_ERR_FORMAT;
+                --depth;
+            } else {
+                if (++elements > 200000) return KHZ_SHEET_ERR_LIMIT;
+                if (depth == 0 && ++roots > 1) return KHZ_SHEET_ERR_FORMAT;
+                if (depth == 64) return KHZ_SHEET_ERR_LIMIT;
+                if (!empty) {names[depth]=name;lengths[depth]=n;++depth;}
+            }
+            close=q+1;
+        }
+        if (!close) return KHZ_SHEET_ERR_FORMAT;
+        p=close;
+    }
+    return depth == 0 && roots == 1 ? KHZ_SHEET_OK : KHZ_SHEET_ERR_FORMAT;
+}
+
 KhzSheetStatus khz_xlsx_reader_check_package(KhzXlsxReader *reader)
 {
 	const KhzXlsxEntry *entry;
@@ -494,7 +580,14 @@ KhzSheetStatus khz_xlsx_reader_check_package(KhzXlsxReader *reader)
 
 	if (reader == NULL) return KHZ_SHEET_ERR_NULL;
 	if (reader->loaded == 0) return KHZ_SHEET_ERR_STATE;
-
+    for (size_t i = 0; i < reader->entry_count; ++i) {
+        const KhzXlsxEntry *part = &reader->entries[i];
+        if ((part->name_len >= 4 && memcmp(part->name + part->name_len-4,".xml",4)==0)
+            || (part->name_len >= 5 && memcmp(part->name + part->name_len-5,".rels",5)==0)) {
+            status = khz_xml_preflight(part->data,part->size, strcmp(part->name,"xl/styles.xml") == 0 ? "styleSheet" : NULL);
+            if (status != KHZ_SHEET_OK) return status;
+        }
+    }
 	status = khz_xlsx_reader_find(reader, "[Content_Types].xml", &entry);
 	if (status != KHZ_SHEET_OK) return status;
 	status = khz_xlsx_reader_find(reader, "_rels/.rels", &entry);
@@ -530,6 +623,8 @@ KhzSheetStatus khz_xlsx_reader_shared_strings(KhzXlsxReader *reader)
     }
     if (status != KHZ_SHEET_OK) return status;
 
+    status = khz_xml_preflight(entry->data, entry->size, "sst");
+    if (status != KHZ_SHEET_OK) return status;
     part = (const char *)entry->data;
     limit = part + entry->size;
     cursor = part;
@@ -705,6 +800,8 @@ KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *shee
     status = khz_xlsx_reader_find(reader, part_name, &entry);
     if (status != KHZ_SHEET_OK) return status;
 
+    status = khz_xml_preflight(entry->data, entry->size, "worksheet");
+    if (status != KHZ_SHEET_OK) return status;
     if (reader->arena == khz_sheet_arena(sheet)) reader->mark = KHZ_XLSX_SHARED_ARENA_MARK;
     row_cursor = (const char *)entry->data;
     limit = row_cursor + entry->size;
@@ -774,16 +871,14 @@ KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *shee
                 status = khz_xlsx_reader_parse_ref(ref, ref_len, &col, &cell_row);
                 if (status != KHZ_SHEET_OK) {
                     reader->report.cells_unsupported += 1u;
-                    if (next_col < KHZ_GRID_MAX_COLUMNS) ++next_col;
-                    cell_cursor = tag_end + 1;
-                    continue;
+                    return status;
                 }
+                if (cell_row != row) return KHZ_SHEET_ERR_FORMAT;
                 next_col = col < KHZ_GRID_MAX_COLUMNS - 1u ? col + 1u : KHZ_GRID_MAX_COLUMNS;
             } else {
                 if (next_col >= KHZ_GRID_MAX_COLUMNS) {
                     reader->report.cells_unsupported += 1u;
-                    cell_cursor = tag_end + 1;
-                    continue;
+                    return KHZ_SHEET_ERR_LIMIT;
                 }
                 col = next_col++;
                 cell_row = row;
@@ -886,7 +981,7 @@ KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *shee
 
             if (type != NULL && type_len == 1u && type[0] == 's') {
                 KhzRational slot;
-                int64_t which;
+                int64_t which = 0;
                 status = khz_xlsx_parse_number(value_open_end + 1,
                     (size_t)(value_close - (value_open_end + 1)), &slot);
                 if (status == KHZ_SHEET_OK) status = khz_rational_to_i64(slot, &which);

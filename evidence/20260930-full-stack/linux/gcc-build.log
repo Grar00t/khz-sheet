@@ -1,0 +1,76 @@
+[  1%] Generating deflated xlsx fixture
+[  3%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_arena.c.o
+[  5%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_rational.c.o
+[  7%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_hash.c.o
+fixture: 2201 bytes, 5 parts, 200 cells, sum 26700
+[  7%] Built target khz_fixture
+[  9%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_cell.c.o
+[ 11%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_grid.c.o
+[ 12%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_simd.c.o
+[ 14%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_sheet.c.o
+[ 16%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_sheet_selftest.c.o
+[ 18%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_formula.c.o
+[ 20%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_formula_eval.c.o
+[ 22%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_formula_deps.c.o
+[ 24%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_inflate.c.o
+[ 25%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_xlsx.c.o
+[ 27%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_xlsx_reader.c.o
+[ 29%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_xlsx_reader_parse.c.o
+[ 31%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_ledger.c.o
+[ 33%] Building C object CMakeFiles/khz_sheet_objects.dir/src/khz_abi.c.o
+[ 33%] Built target khz_sheet_objects
+[ 37%] Linking C shared library libkhz_sheet.so
+[ 37%] Linking C static library libkhz_sheet.a
+[ 37%] Built target khz_sheet
+[ 38%] Building C object CMakeFiles/khz_selftest.dir/khz_selftest_main.c.o
+[ 40%] Building C object CMakeFiles/khz_sheet_failure_test.dir/tests/khz_sheet_failure_test.c.o
+[ 42%] Building C object CMakeFiles/khz_sheet_proof_tamper_test.dir/tests/khz_sheet_proof_tamper_test.c.o
+[ 44%] Linking C executable khz_selftest
+[ 46%] Linking C executable khz_sheet_proof_tamper_test
+[ 48%] Linking C executable khz_sheet_failure_test
+[ 48%] Built target khz_sheet_shared
+[ 50%] Building C object CMakeFiles/khz_xlsx_writer_test.dir/tests/khz_xlsx_writer_test.c.o
+[ 50%] Built target khz_selftest
+[ 50%] Built target khz_sheet_proof_tamper_test
+[ 51%] Linking C executable khz_xlsx_writer_test
+[ 53%] Building C object CMakeFiles/khz_ledger_integrity_test.dir/tests/khz_ledger_integrity_test.c.o
+[ 55%] Building C object CMakeFiles/khz_xlsx_test.dir/tests/khz_xlsx_test.c.o
+[ 55%] Built target khz_sheet_failure_test
+[ 57%] Building C object CMakeFiles/khz_xlsx_cd_size_test.dir/tests/khz_xlsx_cd_size_test.c.o
+[ 59%] Linking C executable khz_ledger_integrity_test
+[ 61%] Linking C executable khz_xlsx_test
+[ 62%] Linking C executable khz_xlsx_cd_size_test
+[ 62%] Built target khz_xlsx_writer_test
+[ 64%] Building C object CMakeFiles/khz_fuzz_test.dir/tests/khz_fuzz_test.c.o
+[ 64%] Built target khz_ledger_integrity_test
+[ 66%] Building C object CMakeFiles/khz_formula_boundary_test.dir/tests/khz_formula_boundary_test.c.o
+[ 68%] Linking C executable khz_fuzz_test
+[ 68%] Built target khz_xlsx_test
+[ 68%] Built target khz_xlsx_cd_size_test
+[ 70%] Building C object CMakeFiles/khz_numeric_boundary_test.dir/tests/khz_numeric_boundary_test.c.o
+[ 72%] Building C object CMakeFiles/khz_formula_transaction_test.dir/tests/khz_formula_transaction_test.c.o
+[ 74%] Linking C executable khz_formula_boundary_test
+[ 75%] Linking C executable khz_formula_transaction_test
+[ 77%] Linking C executable khz_numeric_boundary_test
+[ 77%] Built target khz_fuzz_test
+[ 79%] Building C object CMakeFiles/khz_dependency_retry_test.dir/tests/khz_dependency_retry_test.c.o
+[ 79%] Built target khz_formula_boundary_test
+[ 81%] Building C object CMakeFiles/khz_zip_boundary_test.dir/tests/khz_zip_boundary_test.c.o
+[ 81%] Built target khz_numeric_boundary_test
+[ 81%] Built target khz_formula_transaction_test
+[ 83%] Linking C executable khz_dependency_retry_test
+[ 85%] Building C object CMakeFiles/khz_recalc_property_test.dir/tests/khz_recalc_property_test.c.o
+[ 87%] Building C object CMakeFiles/khz_xlsx_formula_cache_test.dir/tests/khz_xlsx_formula_cache_test.c.o
+[ 88%] Linking C executable khz_zip_boundary_test
+[ 90%] Linking C executable khz_recalc_property_test
+[ 92%] Linking C executable khz_xlsx_formula_cache_test
+[ 92%] Built target khz_dependency_retry_test
+[ 94%] Building C object CMakeFiles/khz_xlsx_resilience_test.dir/tests/khz_xlsx_resilience_test.c.o
+[ 94%] Built target khz_zip_boundary_test
+[ 96%] Building C object CMakeFiles/khz_formula_extended_test.dir/tests/khz_formula_extended_test.c.o
+[ 96%] Built target khz_recalc_property_test
+[ 96%] Built target khz_xlsx_formula_cache_test
+[ 98%] Linking C executable khz_xlsx_resilience_test
+[100%] Linking C executable khz_formula_extended_test
+[100%] Built target khz_xlsx_resilience_test
+[100%] Built target khz_formula_extended_test

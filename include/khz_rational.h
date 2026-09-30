@@ -20,7 +20,7 @@ extern "C" {
    value that carried it could not be normalised or negated without a silent
    wrap. It is refused at construction instead.
 
-   Nothing here rounds. Every operation that cannot be represented exactly
+   Only the explicit round/floor/ceiling operations round. Every result that cannot be represented exactly
    returns KHZ_SHEET_ERR_OVERFLOW and leaves *out untouched. There is no
    fallback to double: a spreadsheet that answers 0.30000000000000004 has
    answered a different question. */
@@ -46,6 +46,12 @@ KhzSheetStatus khz_rational_mul(KhzRational a, KhzRational b, KhzRational *out);
 KhzSheetStatus khz_rational_div(KhzRational a, KhzRational b, KhzRational *out);
 KhzSheetStatus khz_rational_neg(KhzRational a, KhzRational *out);
 KhzSheetStatus khz_rational_abs(KhzRational a, KhzRational *out);
+
+/* Explicit decimal quantization, half away from zero; decimals in [-18,18].
+   Integer-only 128-bit intermediates. Failure leaves out untouched. */
+KhzSheetStatus khz_rational_round(KhzRational a, int64_t decimals, KhzRational *out);
+KhzSheetStatus khz_rational_floor(KhzRational a, KhzRational *out);
+KhzSheetStatus khz_rational_ceiling(KhzRational a, KhzRational *out);
 
 /* *cmp receives -1, 0 or 1. Comparison is exact and does not form potentially
    overflowing cross-products; every pair of valid KhzRational values is

@@ -890,7 +890,11 @@ KhzSheetStatus khz_xlsx_write(const KhzSheet *sheet, KhzArena *scratch,
         return status;
     }
 
+#if defined(_MSC_VER)
+    if (fopen_s(&file, path, "wb") != 0) file = NULL;
+#else
     file = fopen(path, "wb");
+#endif
     if (file == NULL) {
         (void)khz_arena_release(scratch, mark);
         return KHZ_SHEET_ERR_OS;

@@ -1,0 +1,46 @@
+abi      = Ok (ok, native ABI 96, retroactive ranges)
+  OK   create isolated sheet -> Ok
+formula -> formula rewrite:
+  OK   A1 = 10
+  OK   B1 = A1
+  OK   first recalc
+  OK   first recalc evaluated formula
+  OK   B1 = 10/1
+  OK   B1 = 1
+  OK   second recalc
+  OK   second recalc evaluated rewritten formula
+  OK   B1 = 1/1
+  OK   A1 = B1
+  OK   no stale formula edge cycle -> Ok
+  OK   third recalc evaluated formula
+  OK   A1 = 1/1
+  OK   formula rewrite proof verifies at index 0
+  OK   create isolated sheet -> Ok
+formula -> value rewrite:
+  OK   A1 = 10
+  OK   B1 = A1
+  OK   initial recalc
+  OK   initial recalc evaluated formula
+  OK   B1 = 10/1
+  OK   replace B1 formula with numeric 1
+  OK   B1 value = 1/1
+  OK   A1 = B1
+  OK   no stale edge after formula -> value -> Ok
+  OK   reverse formula evaluated
+  OK   A1 = 1/1
+  OK   formula-to-value proof verifies at index 0
+  OK   create isolated sheet -> Ok
+dirty cache state vs proof:
+  OK   A1 = 10
+  OK   B1 = A1
+  OK   initial recalc
+  OK   initial formula evaluated
+  OK   proof valid while clean at index 0
+  OK   A1 = 11 marks B1 dirty
+  OK   B1 is dirty before recalculation
+  OK   proof remains valid while B1 is dirty -> Ok at index 0
+  OK   recalculate dirty B1
+  OK   dirty formula evaluated
+  OK   B1 = 11/1
+  OK   proof valid after recalculation at index 0
+ALL PASS failures=0

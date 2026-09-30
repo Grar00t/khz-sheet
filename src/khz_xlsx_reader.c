@@ -201,7 +201,7 @@ static KhzSheetStatus khz_zip_local_metadata(const unsigned char *raw, size_t bo
     uint16_t flags, uint16_t method, size_t *end)
 {
     if (khz_load_le16(raw + local + 6) != flags) return KHZ_SHEET_ERR_FORMAT;
-    if ((flags & (uint16_t)~0x080eu) != 0 || (method == 0 && (flags & 6u) != 0))
+    if ((flags & UINT16_C(0xf7f1)) != 0 || (method == 0 && (flags & 6u) != 0))
         return KHZ_SHEET_ERR_UNSUPPORTED;
     *end = data + packed; /* khz_zip_payload already bounded this addition. */
     if ((flags & 8u) == 0) {

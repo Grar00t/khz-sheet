@@ -1,0 +1,14 @@
+PASS ABI gate
+PASS seed A1
+PASS seed B1
+PASS parse AST
+PASS initial arena
+PASS declare persistent dependency
+PASS final arena
+PASS persistent dependency is not rewound with scratch IR
+arena_before=32512 arena_after=32528
+PASS overwrite scratch region safely
+PASS traverse dependency after scratch reuse
+PASS proof after scratch reuse
+PASS use after double dispose
+failures=0

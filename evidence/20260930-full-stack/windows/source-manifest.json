@@ -1,0 +1,438 @@
+[
+  {
+    "path": ".github/workflows/desktop-windows.yml",
+    "sha256": "10981fe9807af0ff026dd7450c61524ff4bc4060f6f634aee8fda7906cccf990"
+  },
+  {
+    "path": ".github/workflows/native-ci.yml",
+    "sha256": "5ccea6ab27328845a956c10309334efa9af267be939a91990300f96abe68bba4"
+  },
+  {
+    "path": "build-desktop.ps1",
+    "sha256": "f1b9146d0905c1e934a3028587bde318a761ee4d768aeb99ac60772783c44aed"
+  },
+  {
+    "path": "CMakeLists.txt",
+    "sha256": "62d243e32fd0d19876baeaa5f79c5278060216e397b906c6e410a3bbb1ff00fb"
+  },
+  {
+    "path": "Directory.Build.props",
+    "sha256": "9e4100d0cd7bf98c50c47bd38220fcf35e20a12e11db1db16d813c7addb95731"
+  },
+  {
+    "path": "include/khz_abi.h",
+    "sha256": "3e6e00cbf9faf001b24d2c39acc0fa522ba5000d3cb9c057ab8112c57bcfc4a2"
+  },
+  {
+    "path": "include/khz_arena.h",
+    "sha256": "13a8a1ab3fdf98d106eb001f77b796d437850ed08448ae25034b798f9701d4b7"
+  },
+  {
+    "path": "include/khz_cell.h",
+    "sha256": "1dd16fd15103e89ae50540b6b5a37f3da5ae87051fd2d759a710b2c4703fc9ea"
+  },
+  {
+    "path": "include/khz_formula.h",
+    "sha256": "414f065cb264776146fc72a5c1f8b4369ce91b7f61db9bd37bcacc7f6ce415dc"
+  },
+  {
+    "path": "include/khz_grid.h",
+    "sha256": "49a1d83a0b5b23690d0c275fef63c9b70477df60aa22b83862e818f2f0cb9e95"
+  },
+  {
+    "path": "include/khz_hash.h",
+    "sha256": "293f10f422d15009ddf5e7b0834fd941c02c2e9c5fb9fd71367c594c79174237"
+  },
+  {
+    "path": "include/khz_inflate.h",
+    "sha256": "efa621d822c4d91ebef4535b4292760cec4aab64eb44883735c80c6e2a4394c4"
+  },
+  {
+    "path": "include/khz_ledger.h",
+    "sha256": "4993a44a748dde0cc6ee1628f97604119165e9aab9f29169729d85135d4ef111"
+  },
+  {
+    "path": "include/khz_rational.h",
+    "sha256": "b4cfdecc516cce19a0f6a21961efe213882c1c6063935fcee18ce9d2ce721731"
+  },
+  {
+    "path": "include/khz_sheet.h",
+    "sha256": "4a4d71ef6c740fa136043bf38c61a1936c50332e7122a2d37226a3e4bf090d97"
+  },
+  {
+    "path": "include/khz_simd.h",
+    "sha256": "163dcac501c442ed5380382a3d430f54dae1b98439a7ccabc01a5db5822b99a2"
+  },
+  {
+    "path": "include/khz_status.h",
+    "sha256": "9ac69e58d6decd9ff826a89aec880e9bce164bf9a220eaf597957621f6dd7005"
+  },
+  {
+    "path": "include/khz_xlsx_reader.h",
+    "sha256": "3b480115dc0c24f7acb1bcd7057a27a625229cb897dd6368913cef3a5af099b9"
+  },
+  {
+    "path": "include/khz_xlsx.h",
+    "sha256": "2112a83d0ee533c7ecf219dff328c3d60dfc398eaf63b13df3f325b1e71fbcc1"
+  },
+  {
+    "path": "scripts/verify-linux.sh",
+    "sha256": "1f813d3f95f01eb1215221f37e33ef34c3c1afa056defd966f2b107c697316e0"
+  },
+  {
+    "path": "scripts/verify-windows.ps1",
+    "sha256": "4b9eef432fda7d0d121e473bc33e0dab7cb48d78b490410f05be33c8d59397b9"
+  },
+  {
+    "path": "src/khz_abi.c",
+    "sha256": "e6db42c912aee1f7469ec4d8ea728b31ed4f045402d0cd3d81dee0d2206e7b88"
+  },
+  {
+    "path": "src/khz_arena.c",
+    "sha256": "59288882e4454c0d45bbc3d444f87b31a728a205cf40af5a804213f34a068cd0"
+  },
+  {
+    "path": "src/khz_cell.c",
+    "sha256": "891c30e1c62a4b4aeb6bcf15d01f20be407edacae49324b9204bf7d3699848bf"
+  },
+  {
+    "path": "src/khz_formula_deps.c",
+    "sha256": "0c05bb93f2dcfa1766e5f875b7f368c595504cd784ee1ace4623bad5c9c92488"
+  },
+  {
+    "path": "src/khz_formula_eval.c",
+    "sha256": "e71837b9e42a7fbc9d5a77917a6120ca1214df8359b43909cd8cbf0c8e5475de"
+  },
+  {
+    "path": "src/khz_formula.c",
+    "sha256": "6c51ec0b67d6f24ea3a4723d8952e30b7f3f512aea7ffb0a8e49ed6f7fe047fa"
+  },
+  {
+    "path": "src/khz_grid.c",
+    "sha256": "eab32ed4a29e3cf35f1e52339d79e485ec4236b35c79a74787a99c7c11a925fb"
+  },
+  {
+    "path": "src/khz_hash.c",
+    "sha256": "dd3a5639b2e3190224e2a0aba25120f49e53542754bcacc8794e14be67f6ecf6"
+  },
+  {
+    "path": "src/khz_inflate.c",
+    "sha256": "d1f315b548d3815d2628672af94cbbd445263c778e59f91eec3331acf931f639"
+  },
+  {
+    "path": "src/khz_ledger.c",
+    "sha256": "3af3538d429bddf254dfedf8ff720ca413af45e0dc410b1be086473983c6cca1"
+  },
+  {
+    "path": "src/khz_rational.c",
+    "sha256": "5ddb8cda8b24dfff11976b1def913afd86dabe1bef70bdd76bddf5ba4f67a91c"
+  },
+  {
+    "path": "src/khz_sheet_selftest.c",
+    "sha256": "05a9cf12d1194ae706c4d2ed8526330b97dc223fdcda74e19d355b975bc1200e"
+  },
+  {
+    "path": "src/khz_sheet.c",
+    "sha256": "76d1ac314372a0e54191a8879e9725ca9018c3ec8ccd5dfaa845a848691d0221"
+  },
+  {
+    "path": "src/khz_simd.c",
+    "sha256": "a305326a035843bc7cb35e6e8f34197bcdbcb4bf97bdcdb2cb7aece97e5bb1df"
+  },
+  {
+    "path": "src/khz_wide.h",
+    "sha256": "c0863cb09056134fcc6ca1d92ca2ca0c0ece97a0751ddcc0477e0c541a69f499"
+  },
+  {
+    "path": "src/khz_xlsx_reader_parse.c",
+    "sha256": "755225ada193939c5527147e120022124d0a445ae166c880b7e114c6f309b12a"
+  },
+  {
+    "path": "src/khz_xlsx_reader.c",
+    "sha256": "2fde0656e7de0e00d493303baa01b140a79828b803de5fcda1c2666b910eaab2"
+  },
+  {
+    "path": "src/khz_xlsx.c",
+    "sha256": "38d805434239979fe410a4b8026164cb7d94baa256fee2d474e3796ad5807140"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/BoundedXml.cs",
+    "sha256": "ea045c15a8ab00280af015d0e761f3cb11ec2a086865c2803f46183f03563443"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/CellAddress.cs",
+    "sha256": "4178f95859e36616fd74912f9510f6718586041d158a8692d8ce1b534996df2d"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/CellRange.cs",
+    "sha256": "3696d1f4b30b8ac7ba1837f452c1b0d9f1080030e69849fac8bc99d7851cb211"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/FormulaLexer.cs",
+    "sha256": "dd12a6fa4a624eb3fe539c33a03fa00b9c4cd2e9183866bea232b49777912175"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/FormulaNode.cs",
+    "sha256": "3a9e6cfefdeb6492044d08135bb71eabf4b4db714fbf40e2175b25aee1d9de9c"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/FormulaParser.cs",
+    "sha256": "9a9f38e8be6ba12244624fd33cd4101aebea4df1a1b9f674320132bb08741c49"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/FormulaToken.cs",
+    "sha256": "8810f1b1ba59d4d0548ac3cd5efdd9dae9c151f366825f7e7fb8a066d3b2d1ed"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/KHZ.Sheet.Core.csproj",
+    "sha256": "ade0f1419510cea727655fb499e6a855c9749ac81514a92a27acd5fb2b3417b0"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/KhzAbi.cs",
+    "sha256": "cdab7c2b7d8308d0b8f39c6bcf5fe3cf07aa60041ff83a5967511468e4034af9"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/KhzFormula.cs",
+    "sha256": "0106b79e2309781277eae9fb25573e0d5f2bcb49905e45091d07c104149cabb3"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/KhzNative.cs",
+    "sha256": "5cb8b19a434e66dedc0da7c2b3ae88670066db1b71418392eff7e87c099bedf5"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/KhzXlsx.cs",
+    "sha256": "39dbd6fec3f187a381adde64bb0a0af69af577404e650d6b03dc4045cce42d49"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/NativeScratchArena.cs",
+    "sha256": "ed8048563be00cfd14ef521af452406ed1b9c48277c1fd0728c399c70e0c121d"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/NativeSheetFormula.cs",
+    "sha256": "ae2f2629b6eb901bd7e0dd73f71eecbf6b5ce17c3903cdda8d4c3577095caf11"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/NativeSheetXlsxExtensions.cs",
+    "sha256": "6a0756b2bf6f2e95dc2ab43b3b9117c47a545f7ff1a6ef37b849e0e5e182f3ef"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/OpcPackage.cs",
+    "sha256": "5b7ff5b30e2f2e21718fade1cf8c61af891e97899349260b805a3343e6602f0a"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/SharedStringTable.cs",
+    "sha256": "bee11b444946028580ee7290324927ebf51f593af57ea6f19ecc62e386f05dca"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/SheetStatus.cs",
+    "sha256": "f38cb4ebb6c6455f3d39c6eae54f8b712177ae559aa91f8ad9f94697a8e14b3a"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/WorkbookObjects.cs",
+    "sha256": "ebc194bca2fff58809fcb1025d203b921f5f15dbe240f6ce26b2277bbba5d0ea"
+  },
+  {
+    "path": "src/KHZ.Sheet.Core/WorksheetReader.cs",
+    "sha256": "d71c057d4952d595c1d89d1ac23565c3bb6c0aee4dfb29324cb8c2e37bce9634"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/App.xaml",
+    "sha256": "c4517b6e304a48cb2685cc47338c6f79ac2de2fb7923a6f3e9ba8d95657e8611"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/App.xaml.cs",
+    "sha256": "7e33b74d2919519425e640da0bcbcd31e3a0e1a4f94b4c7d898dbb9e487d9810"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/Assets/khz-sheet.ico",
+    "sha256": "d6168a43db57c835da27b2e3e25efde7abaeb6900dbcb47f93ceb31ee2cc11a0"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/Assets/khz-sheet.png",
+    "sha256": "67b7a4ba46046e1f7aaced562cef886efde1ae5539b5ead5146d286eb976c47c"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/CellFormatting.cs",
+    "sha256": "3ca1955a7b8996415c86794f3641e23f514ea8730bc8bdcadc7db20b73d47aff"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/ChartView.cs",
+    "sha256": "bc1993ad6bc9f853734bba4eed9f50b5fcd17955bde54ce56b8a522483c5e26d"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/GlobalUsings.cs",
+    "sha256": "9087a69bb7c9490f6c6505a3cdc3ced73cf0a64d4cd3706b9148292a87bd4000"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/KHZ.Sheet.Desktop.csproj",
+    "sha256": "e65132cc96ae0377ff71d7c8a7ea12c39989fc615390e262c34ef1f4917d663e"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/MainWindow.Objects.cs",
+    "sha256": "c9c2b7c44e670a9c0e714c93798b952d0c1fe7fdce8f99cca4a32c54b85cead0"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/MainWindow.xaml",
+    "sha256": "89ae2291f9a873412e52194c7507730991f55382c5465018b36f0e8e56719005"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/MainWindow.xaml.cs",
+    "sha256": "6bbde2334b8316d84a34ade3c65b02c232e9b5985a37151b13ffb8716be9b478"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/WorkbookObjectsSession.cs",
+    "sha256": "9310b80b5095e6116a6e68767498a55a1e95727d0e35532ea006306a15e972eb"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/WorkbookSession.cs",
+    "sha256": "4c66d6a3b5051a5cd623806ccca3e2c6d65c463594df03d5811d45653afe3950"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/XlsxObjectsSerializer.cs",
+    "sha256": "87164fe76e7ab114e408c964369fe71924dd25c565b84fb0ddf47d69f11583b5"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/XlsxPresentationReader.cs",
+    "sha256": "f55c2081fb8f02c5a989fd8cc3106ec7c004e938f622e945d3289b0102b95747"
+  },
+  {
+    "path": "src/KHZ.Sheet.Desktop/XlsxPresentationSerializer.cs",
+    "sha256": "6c47e9900d98e3f6f3f936cbfc1b79185b43b5ffd189b36165c0a25de7774e70"
+  },
+  {
+    "path": "tests/dotnet/KhzBoundaryContracts/AbiBoundaryTests.cs",
+    "sha256": "953e8a56345799b32ab8d9729afa156daee21538133115b499957d16c46eb025"
+  },
+  {
+    "path": "tests/dotnet/KhzBoundaryContracts/KhzBoundaryContracts.csproj",
+    "sha256": "c28b93706f4b0b174434d26f33218903f912fe17304822f2fd7cbf27fe1289f3"
+  },
+  {
+    "path": "tests/dotnet/KhzBoundaryContracts/Program.cs",
+    "sha256": "af35b0a31e5af82e0ba6ec4b3d5fb36b7398b00fda6cc5e4847ffa03e6d130df"
+  },
+  {
+    "path": "tests/dotnet/KhzDependencyRewrite/KhzDependencyRewrite.csproj",
+    "sha256": "9bfaa28c7ec6d626d1eb310a25b650278eeec3e78f81b40c9e7f027d3c0a936a"
+  },
+  {
+    "path": "tests/dotnet/KhzDependencyRewrite/Program.cs",
+    "sha256": "3be1eb1538555283e1926d1f2c91008d42225fc469e3cacdd4fb8873576951a3"
+  },
+  {
+    "path": "tests/dotnet/KhzDesktopContracts/KhzDesktopContracts.csproj",
+    "sha256": "67d4ceac25913b09916f64de72c9a33da99bd3ed481d12674d3397212f692ac3"
+  },
+  {
+    "path": "tests/dotnet/KhzDesktopContracts/Program.cs",
+    "sha256": "4717dc50db4b480321cc2eea5b1602ba8b0139f920c649bfb34cbd2e9283a598"
+  },
+  {
+    "path": "tests/dotnet/KhzExactLiteral/KhzExactLiteral.csproj",
+    "sha256": "dac7f00825ede07ef106eb43758e047a9c10b088ed153951f495b9ac2af8cecb"
+  },
+  {
+    "path": "tests/dotnet/KhzExactLiteral/Program.cs",
+    "sha256": "669f4ebdc3c2ea9eefdb37b753e093f1485f23dfbbb1ab1b79af4bb9ed58a84e"
+  },
+  {
+    "path": "tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj",
+    "sha256": "c6609e03990ff6e04d703499ae53807d77bc64758b46cdcebfa8fe18a79ab73c"
+  },
+  {
+    "path": "tests/dotnet/KhzFormulaCells/Program.cs",
+    "sha256": "a918ce7035a486d448ad82cb89fbfa94fbeb3aa77b25dd686822ffef088b8d94"
+  },
+  {
+    "path": "tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj",
+    "sha256": "5dacaf543f95c374985628f698b91097559a8209dfe4cca248db656bf9689cb9"
+  },
+  {
+    "path": "tests/dotnet/KhzOpcPackage/Program.cs",
+    "sha256": "abad3b9493c055a7bd9b6647757ba1004019ece0776e5b4b3b67271780f3c529"
+  },
+  {
+    "path": "tests/dotnet/KhzSubsystemContracts/KhzSubsystemContracts.csproj",
+    "sha256": "055bce6100069b4035dc0eafc6ab571847fe0bef0e8e9ebaa0f6dfb6d14321db"
+  },
+  {
+    "path": "tests/dotnet/KhzSubsystemContracts/Program.cs",
+    "sha256": "4a065f56257ddaa2c3bf3c6c1dd27c98cc2a41d6a24c1c0926bdbcfb963b166b"
+  },
+  {
+    "path": "tests/khz_dependency_retry_test.c",
+    "sha256": "ecdf74a6cce7f724658bf618bb6d333e24cdd4bec581af679c0c63077de10181"
+  },
+  {
+    "path": "tests/khz_formula_boundary_test.c",
+    "sha256": "d9f19d9bd77016f20764dace3ba9981775f8718dd1cb5f06520c67cf8f534671"
+  },
+  {
+    "path": "tests/khz_formula_extended_test.c",
+    "sha256": "0ccb8d1f441421ff189cf524bc04739db93d86eb93179ff3fd36f978612984e2"
+  },
+  {
+    "path": "tests/khz_formula_transaction_test.c",
+    "sha256": "7e0f9865751bda3f0eb65f8078af8e07d35e0645234af3d933863748425f0dd6"
+  },
+  {
+    "path": "tests/khz_fuzz_test.c",
+    "sha256": "3846606b187368e01af7782181e76190c4bf238772efd63bedc499b6f15633d5"
+  },
+  {
+    "path": "tests/khz_ledger_integrity_test.c",
+    "sha256": "f9343559842e556ccc36f55037b7f1dae59afd8c898cfa73aaa1b3b57b112ac5"
+  },
+  {
+    "path": "tests/khz_numeric_boundary_test.c",
+    "sha256": "874c0431e57c16fde201add012d0654ce59a9b234619373cc79994b4484c4423"
+  },
+  {
+    "path": "tests/khz_presentation_oracle.py",
+    "sha256": "a3a69bdf3fcc079243c1671ca532eea156cd3bbb7ef2351cb0e99d1573f2dd3f"
+  },
+  {
+    "path": "tests/khz_rational_oracle.py",
+    "sha256": "d8a4ddae74ce84048d8987003d560baa08f2205c31922170cb4b61bc9cb24e04"
+  },
+  {
+    "path": "tests/khz_recalc_property_test.c",
+    "sha256": "91b38ccfdbaecc0519e0938239c991988db4418a3bea4b66ef504fab02a16c08"
+  },
+  {
+    "path": "tests/khz_sheet_failure_test.c",
+    "sha256": "4227f3bfb1e69572fec3f039a5f2084cad00d6b99712a2905656f3f970bfd6b5"
+  },
+  {
+    "path": "tests/khz_sheet_proof_tamper_test.c",
+    "sha256": "69bf54a9f9aa210bd4a067a7bf8f4523ae6426f52c2683b95554a70b30212609"
+  },
+  {
+    "path": "tests/khz_xlsx_cd_size_test.c",
+    "sha256": "db8788e4bfc8c10961b1222945012ee1ba2dcad358dab6606a0f063855e143a7"
+  },
+  {
+    "path": "tests/khz_xlsx_formula_cache_test.c",
+    "sha256": "4bfc09b4cf04c76b9828f91d1e414767aa67a985a4ffe064987bf26423081235"
+  },
+  {
+    "path": "tests/khz_xlsx_resilience_test.c",
+    "sha256": "b5ccf50a26db99dedecbd9869b0acde0bae0995ee0badd974c46d2a408c97529"
+  },
+  {
+    "path": "tests/khz_xlsx_test.c",
+    "sha256": "f6fa15411333a1bfb42b7030c655ee735844d524663db6bfe7de277438d7c71a"
+  },
+  {
+    "path": "tests/khz_xlsx_writer_test.c",
+    "sha256": "4d6f104b4f5c63cdbda60d14f04131181966d96d31bb30a05e97c9db56d314d0"
+  },
+  {
+    "path": "tests/khz_zip_boundary_test.c",
+    "sha256": "bf694fb9609efe44fbba4c12fe4bbd13e352b7ac3f01d42e08c06f66c71f4bfe"
+  },
+  {
+    "path": "tests/make_fixture.py",
+    "sha256": "e7b00a2ac374243e53f71a62c9ebf279b58782a10a05ed91da60aac3a3e37b6e"
+  }
+]

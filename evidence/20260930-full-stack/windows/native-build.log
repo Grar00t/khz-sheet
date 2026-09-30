@@ -1,0 +1,82 @@
+MSBuild version 18.10.1-1.26427.6+3cd27c13e for .NET Framework
+
+MSBuild version 18.10.1-1.26427.6+3cd27c13e for .NET Framework
+
+  1>Checking Build System
+  Building Custom Rule {repo}/CMakeLists.txt
+  khz_arena.c
+  khz_hash.c
+  khz_rational.c
+  khz_cell.c
+  khz_grid.c
+  khz_simd.c
+  khz_sheet.c
+  khz_sheet_selftest.c
+  khz_formula.c
+  khz_formula_eval.c
+  khz_formula_deps.c
+  khz_inflate.c
+  khz_xlsx.c
+  khz_xlsx_reader.c
+  khz_xlsx_reader_parse.c
+  khz_ledger.c
+  khz_abi.c
+  Generating Code...
+  khz_sheet_objects.vcxproj -> {repo}\build\verify\khz_sheet_objects.dir\Release\khz_sheet_objects.lib
+  Generating deflated xlsx fixture
+  fixture: 2201 bytes, 5 parts, 200 cells, sum 26700
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  khz_sheet.vcxproj -> {repo}\build\verify\Release\khz_sheet.lib
+  Auto build dll exports
+     Creating library {repo}/build/verify/Release/khz_sheet.lib and object {repo}/build/verify/Release/khz_sheet.exp
+  khz_sheet_shared.vcxproj -> {repo}\build\verify\Release\khz_sheet.dll
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  Building Custom Rule {repo}/CMakeLists.txt
+  khz_recalc_property_test.c
+  khz_sheet_proof_tamper_test.c
+  khz_zip_boundary_test.c
+  khz_formula_boundary_test.c
+  khz_xlsx_writer_test.c
+  Building Custom Rule {repo}/CMakeLists.txt
+  khz_formula_boundary_test.vcxproj -> {repo}\build\verify\Release\khz_formula_boundary_test.exe
+  khz_recalc_property_test.vcxproj -> {repo}\build\verify\Release\khz_recalc_property_test.exe
+  khz_dependency_retry_test.c
+  khz_fuzz_test.c
+  khz_xlsx_cd_size_test.c
+  khz_numeric_boundary_test.c
+  khz_xlsx_writer_test.vcxproj -> {repo}\build\verify\Release\khz_xlsx_writer_test.exe
+  khz_zip_boundary_test.vcxproj -> {repo}\build\verify\Release\khz_zip_boundary_test.exe
+  khz_sheet_failure_test.c
+  khz_xlsx_formula_cache_test.c
+  khz_selftest_main.c
+  khz_dependency_retry_test.vcxproj -> {repo}\build\verify\Release\khz_dependency_retry_test.exe
+  khz_sheet_proof_tamper_test.vcxproj -> {repo}\build\verify\Release\khz_sheet_proof_tamper_test.exe
+  khz_numeric_boundary_test.vcxproj -> {repo}\build\verify\Release\khz_numeric_boundary_test.exe
+  khz_fuzz_test.vcxproj -> {repo}\build\verify\Release\khz_fuzz_test.exe
+  khz_xlsx_resilience_test.c
+  Building Custom Rule {repo}/CMakeLists.txt
+  khz_selftest.vcxproj -> {repo}\build\verify\Release\khz_selftest.exe
+  khz_formula_extended_test.c
+  khz_sheet_failure_test.vcxproj -> {repo}\build\verify\Release\khz_sheet_failure_test.exe
+  khz_xlsx_formula_cache_test.vcxproj -> {repo}\build\verify\Release\khz_xlsx_formula_cache_test.exe
+  khz_xlsx_cd_size_test.vcxproj -> {repo}\build\verify\Release\khz_xlsx_cd_size_test.exe
+  khz_xlsx_resilience_test.vcxproj -> {repo}\build\verify\Release\khz_xlsx_resilience_test.exe
+  Building Custom Rule {repo}/CMakeLists.txt
+  khz_xlsx_test.c
+  Building Custom Rule {repo}/CMakeLists.txt
+  khz_formula_extended_test.vcxproj -> {repo}\build\verify\Release\khz_formula_extended_test.exe
+  khz_formula_transaction_test.c
+  khz_xlsx_test.vcxproj -> {repo}\build\verify\Release\khz_xlsx_test.exe
+  khz_formula_transaction_test.vcxproj -> {repo}\build\verify\Release\khz_formula_transaction_test.exe

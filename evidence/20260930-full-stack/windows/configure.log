@@ -1,0 +1,10 @@
+-- Selecting Windows SDK version 10.0.26100.0 to target Windows 10.0.26200.
+-- khz_sheet: baseline ISA build; scalar or architecture baseline SIMD is used
+-- khz_sheet: ledger disabled; khz_ledger_* returns ERR_UNSUPPORTED
+CMake Warning at CMakeLists.txt:148 (message):
+  SQLite development files not found; AUTO disables the ledger
+
+
+-- Configuring done (0.8s)
+-- Generating done (0.5s)
+-- Build files have been written to: {repo}/build/verify

@@ -173,11 +173,24 @@ KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
     case KHZ_FORMULA_MUL:
     case KHZ_FORMULA_DIV:
     case KHZ_FORMULA_POW:
+    case KHZ_FORMULA_ROUND:
+    case KHZ_FORMULA_EQ:
+    case KHZ_FORMULA_NE:
+    case KHZ_FORMULA_LT:
+    case KHZ_FORMULA_LE:
+    case KHZ_FORMULA_GT:
+    case KHZ_FORMULA_GE:
         if (child_count != (size_t)2) {
             return KHZ_SHEET_ERR_FORMAT;
         }
         break;
+    case KHZ_FORMULA_IF:
+        if (child_count != 3) return KHZ_SHEET_ERR_FORMAT;
+        break;
     case KHZ_FORMULA_NEG:
+    case KHZ_FORMULA_ABS:
+    case KHZ_FORMULA_CEILING:
+    case KHZ_FORMULA_FLOOR:
         if (child_count != (size_t)1) {
             return KHZ_SHEET_ERR_FORMAT;
         }
@@ -186,6 +199,9 @@ KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
     case KHZ_FORMULA_AVG:
     case KHZ_FORMULA_MIN:
     case KHZ_FORMULA_MAX:
+    case KHZ_FORMULA_COUNT:
+    case KHZ_FORMULA_COUNTA:
+    case KHZ_FORMULA_PRODUCT:
         if (child_count == (size_t)0 || child_count > KHZ_FORMULA_MAX_ARGS) {
             return KHZ_SHEET_ERR_FORMAT;
         }
@@ -248,6 +264,21 @@ const char *khz_formula_op_name(KhzFormulaOp op)
     case KHZ_FORMULA_MIN:   return "MIN";
     case KHZ_FORMULA_MAX:   return "MAX";
     case KHZ_FORMULA_POW:   return "POW";
+    case KHZ_FORMULA_COUNT: return "COUNT";
+    case KHZ_FORMULA_COUNTA: return "COUNTA";
+    case KHZ_FORMULA_PRODUCT: return "PRODUCT";
+    case KHZ_FORMULA_ABS: return "ABS";
+    case KHZ_FORMULA_ROUND: return "ROUND";
+    case KHZ_FORMULA_CEILING: return "CEILING";
+    case KHZ_FORMULA_FLOOR: return "FLOOR";
+    case KHZ_FORMULA_IF: return "IF";
+    case KHZ_FORMULA_EQ: return "EQ";
+    case KHZ_FORMULA_NE: return "NE";
+    case KHZ_FORMULA_LT: return "LT";
+    case KHZ_FORMULA_LE: return "LE";
+    case KHZ_FORMULA_GT: return "GT";
+    case KHZ_FORMULA_GE: return "GE";
+
     default:                return "UNKNOWN";
     }
 }
@@ -554,6 +585,22 @@ static KhzSheetStatus khz_function_op(const char *text, size_t len, KhzFormulaOp
         *op = KHZ_FORMULA_MIN;
     } else if (khz_word_matches(text, len, "MAX")) {
         *op = KHZ_FORMULA_MAX;
+    } else if (khz_word_matches(text, len, "COUNT")) {
+        *op = KHZ_FORMULA_COUNT;
+    } else if (khz_word_matches(text, len, "COUNTA")) {
+        *op = KHZ_FORMULA_COUNTA;
+    } else if (khz_word_matches(text, len, "PRODUCT")) {
+        *op = KHZ_FORMULA_PRODUCT;
+    } else if (khz_word_matches(text, len, "ABS")) {
+        *op = KHZ_FORMULA_ABS;
+    } else if (khz_word_matches(text, len, "ROUND")) {
+        *op = KHZ_FORMULA_ROUND;
+    } else if (khz_word_matches(text, len, "CEILING")) {
+        *op = KHZ_FORMULA_CEILING;
+    } else if (khz_word_matches(text, len, "FLOOR")) {
+        *op = KHZ_FORMULA_FLOOR;
+    } else if (khz_word_matches(text, len, "IF")) {
+        *op = KHZ_FORMULA_IF;
     } else {
         return KHZ_SHEET_ERR_MISSING;
     }
@@ -616,7 +663,7 @@ static KhzSheetStatus khz_parse_primary(KhzParser *p, KhzFormulaNode **out)
 
             status = khz_function_op(p->src + start, length, &op);
             if (status != KHZ_SHEET_OK) {
-                khz_parse_fail(p, "SUM AVG MIN or MAX");
+                khz_parse_fail(p, "supported function");
                 return status;
             }
 
@@ -657,6 +704,11 @@ static KhzSheetStatus khz_parse_primary(KhzParser *p, KhzFormulaNode **out)
             return khz_formula_node(p->formula, op, args, arg_count, out);
         }
 
+        if (khz_word_matches(p->src + start, length, "TRUE")
+            || khz_word_matches(p->src + start, length, "FALSE")) {
+            KhzRational v = {khz_word_matches(p->src + start, length, "TRUE") ? 1 : 0, 1};
+            return khz_formula_const(p->formula, v, out);
+        }
         status = khz_formula_parse_ref(p->src + start, length, &col0, &row0);
         if (status != KHZ_SHEET_OK) {
             khz_parse_fail(p, "cell reference");
@@ -853,7 +905,7 @@ static KhzSheetStatus khz_parse_term(KhzParser *p, KhzFormulaNode **out)
     return KHZ_SHEET_OK;
 }
 
-static KhzSheetStatus khz_parse_expr(KhzParser *p, KhzFormulaNode **out)
+static KhzSheetStatus khz_parse_sum(KhzParser *p, KhzFormulaNode **out)
 {
     KhzFormulaNode *left = NULL;
     KhzSheetStatus status;
@@ -907,6 +959,33 @@ static KhzSheetStatus khz_parse_expr(KhzParser *p, KhzFormulaNode **out)
     --p->depth;
     *out = left;
 
+    return KHZ_SHEET_OK;
+}
+
+static KhzSheetStatus khz_parse_expr(KhzParser *p, KhzFormulaNode **out)
+{
+    KhzFormulaNode *left = NULL;
+    KhzSheetStatus status = khz_parse_sum(p, &left);
+    if (status != KHZ_SHEET_OK) return status;
+    for (;;) {
+        KhzFormulaOp op;
+        KhzFormulaNode *pair[2];
+        khz_skip_space(p);
+        char c = khz_peek(p);
+        if (c != '=' && c != '<' && c != '>') break;
+        ++p->pos;
+        char next = khz_peek(p);
+        if (c == '<' && next == '>') { op = KHZ_FORMULA_NE; ++p->pos; }
+        else if (c == '<' && next == '=') { op = KHZ_FORMULA_LE; ++p->pos; }
+        else if (c == '>' && next == '=') { op = KHZ_FORMULA_GE; ++p->pos; }
+        else op = c == '=' ? KHZ_FORMULA_EQ : c == '<' ? KHZ_FORMULA_LT : KHZ_FORMULA_GT;
+        pair[0] = left;
+        status = khz_parse_sum(p, &pair[1]);
+        if (status != KHZ_SHEET_OK) return status;
+        status = khz_formula_node(p->formula, op, pair, 2, &left);
+        if (status != KHZ_SHEET_OK) return status;
+    }
+    *out = left;
     return KHZ_SHEET_OK;
 }
 

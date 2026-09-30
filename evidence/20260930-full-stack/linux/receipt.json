@@ -1,0 +1,165 @@
+{
+  "schema": 1,
+  "platform": "Linux",
+  "steps": [
+    {
+      "name": "gcc-version",
+      "command": [
+        "gcc",
+        "--version"
+      ],
+      "exitCode": 0,
+      "seconds": 0,
+      "compilerWarnings": 0,
+      "log": "gcc-version.log",
+      "sha256": "869da503a0a7ebcc4fccdda567eb79d08aade49d9fb6d19857d8c6e037467989",
+      "runLogSha256": "6e876a25bb7fdb71ab2914e8f1eeaa00cc61d20a36a6c2981ab7d4d7ceab42f8"
+    },
+    {
+      "name": "clang-version",
+      "command": [
+        "clang",
+        "--version"
+      ],
+      "exitCode": 0,
+      "seconds": 0,
+      "compilerWarnings": 0,
+      "log": "clang-version.log",
+      "sha256": "ddea17f1273cf52729ca27d3cc1386d076dd825044d9d56a2e9709153d7747f5",
+      "runLogSha256": "77467400b91c4cebb6c3e29d8a611af518a2f4078c22baf276b0a1373e996bf5"
+    },
+    {
+      "name": "gcc-configure",
+      "command": [
+        "cmake",
+        "-S",
+        "{repo}",
+        "-B",
+        "{linux-build}/gcc",
+        "-DCMAKE_C_COMPILER=gcc",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DKHZ_ENABLE_LEDGER=ON",
+        "-DKHZ_STRICT_WARNINGS=ON",
+        "-DKHZ_BUILD_TESTS=ON",
+        "-DKHZ_BUILD_SHARED=ON"
+      ],
+      "exitCode": 0,
+      "seconds": 0,
+      "compilerWarnings": 0,
+      "log": "gcc-configure.log",
+      "sha256": "b7c55900f6c9ab8d7e671fd9907d56ca539687f539ed981d92524561aa0fe86c",
+      "runLogSha256": "cc78a4dfb54eceed36c6e1dccd327a80fc44afb9e3a66b66048d67cb88ffbedc"
+    },
+    {
+      "name": "gcc-build",
+      "command": [
+        "cmake",
+        "--build",
+        "{linux-build}/gcc",
+        "--parallel",
+        "4",
+        "--clean-first"
+      ],
+      "exitCode": 0,
+      "seconds": 4,
+      "compilerWarnings": 0,
+      "log": "gcc-build.log",
+      "sha256": "0c6718a53559489939a82f8a76074270c6b00f2ab620a82c2e799fd535321d44",
+      "runLogSha256": "9db621ae12b3086582b317e830eb88fe4675956d0b29c5ef3387106424d1472d"
+    },
+    {
+      "name": "gcc-ctest",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "{linux-build}/gcc",
+        "--output-on-failure",
+        "-V",
+        "--output-junit",
+        "{repo}/build/evidence-linux/gcc-ctest.xml"
+      ],
+      "exitCode": 0,
+      "seconds": 6,
+      "compilerWarnings": 0,
+      "log": "gcc-ctest.log",
+      "sha256": "c818a1c853f548637c53d8ed3598103ad75a62428afdbcf45d2f97f7cdb985ad",
+      "runLogSha256": "6d37db108d8489fb2e9cbc2f9f3ea6f1d0af1bacd69ed189c488448322d10bec"
+    },
+    {
+      "name": "sanitizer-configure",
+      "command": [
+        "cmake",
+        "-S",
+        "{repo}",
+        "-B",
+        "{linux-build}/sanitize",
+        "-DCMAKE_C_COMPILER=clang",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DKHZ_ENABLE_LEDGER=OFF",
+        "-DKHZ_STRICT_WARNINGS=ON",
+        "-DKHZ_BUILD_TESTS=ON",
+        "-DKHZ_BUILD_SHARED=OFF",
+        "-DKHZ_ENABLE_ASAN=ON",
+        "-DKHZ_ENABLE_UBSAN=ON"
+      ],
+      "exitCode": 0,
+      "seconds": 0,
+      "compilerWarnings": 0,
+      "log": "sanitizer-configure.log",
+      "sha256": "07ce3ff45d65a90354d206c956988e8a02386ef7acb33a782e3dafdc653b5f4a",
+      "runLogSha256": "2e16ff1f28ccbbbc634b1d500eeb0cfa1bbaeb1576e03b131989802ea35109f8"
+    },
+    {
+      "name": "sanitizer-build",
+      "command": [
+        "cmake",
+        "--build",
+        "{linux-build}/sanitize",
+        "--parallel",
+        "4",
+        "--clean-first"
+      ],
+      "exitCode": 0,
+      "seconds": 2,
+      "compilerWarnings": 0,
+      "log": "sanitizer-build.log",
+      "sha256": "af336878767dd51bb15cf64b70d9a490880c511d3fdef208ff893c687d9eee4f",
+      "runLogSha256": "87c8d54c8b4330259e568a5a0e9fd91cf3758c288ce2f084bd931a2ab3c2afac"
+    },
+    {
+      "name": "sanitizer-ctest",
+      "command": [
+        "env",
+        "ASAN_OPTIONS=detect_leaks=1",
+        "UBSAN_OPTIONS=halt_on_error=1",
+        "ctest",
+        "--test-dir",
+        "{linux-build}/sanitize",
+        "--output-on-failure",
+        "-V",
+        "--output-junit",
+        "{repo}/build/evidence-linux/sanitizer-ctest.xml"
+      ],
+      "exitCode": 0,
+      "seconds": 8,
+      "compilerWarnings": 0,
+      "log": "sanitizer-ctest.log",
+      "sha256": "5179e69cf64147d44f2e367c3c68a5fee9676cf1f60a94aea7a343dcae199a1c",
+      "runLogSha256": "438f9b864a46a621c9432ffb818eb533253a51c5bd387b473f0b74f5b0e3d23d"
+    }
+  ],
+  "compilerWarnings": 0,
+  "success": true,
+  "gcc": {
+    "tests": 18,
+    "failures": 0,
+    "disabled": 0
+  },
+  "sanitizer": {
+    "tests": 16,
+    "failures": 0,
+    "disabled": 0
+  },
+  "implementationCommit": "5b84d2b563775b85ff14b26f6b857858e73242e5",
+  "normalization": "Machine-specific paths replaced; step sha256 identifies the published normalized log; runLogSha256 identifies the original run log."
+}
