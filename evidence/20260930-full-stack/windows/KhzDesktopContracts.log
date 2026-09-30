@@ -1,0 +1,45 @@
+PASS native engine available
+PASS commit A1=41
+PASS commit A1=42
+PASS A1 current input
+PASS undo succeeds
+PASS undo restores input
+PASS redo succeeds
+PASS redo restores input
+PASS commit D3 formula
+PASS find formula text
+PASS find returns D3
+PASS missing query returns false
+PASS apply cell format
+PASS font format stored
+PASS color format stored
+PASS alignment stored
+PASS underline and wrap stored
+PASS number format stored
+PASS number format renders locally
+PASS underline renders locally
+PASS wrap renders locally
+PASS undo format succeeds
+PASS undo removes explicit format
+PASS redo format succeeds
+PASS redo restores format
+PASS apply table style
+PASS table header format
+PASS table band format
+PASS undo table style
+PASS table style removed by undo
+PASS redo table style for export
+PASS export styled xlsx
+PASS export reports style serialization
+PASS styles.xml emitted
+PASS styles.xml root valid
+PASS styles content type linked
+PASS styles relationship linked
+PASS existing formatted cell has style index
+PASS empty table cell persisted with style index
+PASS table header cell has style index
+PASS xlsx number format id persisted
+PASS xlsx wrap persisted
+PASS xlsx underline persisted
+PASS xlsx implicit formatted font matches desktop default
+failures=0

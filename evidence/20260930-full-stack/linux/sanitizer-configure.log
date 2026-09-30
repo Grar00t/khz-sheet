@@ -1,0 +1,6 @@
+-- khz_sheet: sanitizers active: -fsanitize=address;-fsanitize=undefined;-fno-sanitize-recover=undefined
+-- khz_sheet: baseline ISA build; scalar or architecture baseline SIMD is used
+-- khz_sheet: ledger disabled; khz_ledger_* returns ERR_UNSUPPORTED
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: {linux-build}/sanitize

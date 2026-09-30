@@ -1,0 +1,5 @@
+-- khz_sheet: baseline ISA build; scalar or architecture baseline SIMD is used
+-- khz_sheet: ledger enabled against /usr/lib/x86_64-linux-gnu/libsqlite3.so
+-- Configuring done (0.0s)
+-- Generating done (0.1s)
+-- Build files have been written to: {linux-build}/gcc

@@ -1,0 +1,312 @@
+{
+  "schema": 1,
+  "platform": "Windows",
+  "startedUtc": "2026-09-30T19:45:39.6699068Z",
+  "baseCommit": "b7024c2364357bdf8714f5f8a2c391353e354764",
+  "sourceManifestSha256": "f2a6bd257a1bc11f5d97deacdbcbd780b5ac6045b55acc50d2a719416580be70",
+  "compilerWarnings": 0,
+  "native": {
+    "disabled": 0,
+    "failures": 0,
+    "tests": 17
+  },
+  "managedRunners": 7,
+  "managedTestDiscovery": "Console assertion runners: dotnet run executes checks; dotnet test discovers no test-framework cases.",
+  "steps": [
+    {
+      "name": "cmake-version",
+      "command": "cmake --version",
+      "exitCode": 0,
+      "seconds": 0.0536705,
+      "compilerWarnings": 0,
+      "log": "cmake-version.log",
+      "sha256": "af1b82b57223898998f8c5425148282ef6c86c88d151ffd259e7b2e9fee0247e",
+      "summaries": [],
+      "runLogSha256": "af1b82b57223898998f8c5425148282ef6c86c88d151ffd259e7b2e9fee0247e"
+    },
+    {
+      "name": "dotnet-version",
+      "command": "dotnet --version",
+      "exitCode": 0,
+      "seconds": 0.1512897,
+      "compilerWarnings": 0,
+      "log": "dotnet-version.log",
+      "sha256": "3db6bca4b50618b2e0d2d55d23b3d0541fe039ab6f731df0e9c47317b400ce52",
+      "summaries": [],
+      "runLogSha256": "3db6bca4b50618b2e0d2d55d23b3d0541fe039ab6f731df0e9c47317b400ce52"
+    },
+    {
+      "name": "configure",
+      "command": "cmake -S . -B build/verify -DKHZ_ENABLE_LEDGER=AUTO -DKHZ_BUILD_TESTS=ON -DKHZ_BUILD_SHARED=ON -DKHZ_STRICT_WARNINGS=ON",
+      "exitCode": 0,
+      "seconds": 1.452525,
+      "compilerWarnings": 0,
+      "log": "configure.log",
+      "sha256": "00fcda485ebbf3de5bf4290a290195b771f78254897df7e3c5b3d239e8e33c60",
+      "summaries": [],
+      "runLogSha256": "8c343dd44c92361d4413ff4e07a6ec723f4079f11bcd03d9732943f7e9c3b557"
+    },
+    {
+      "name": "native-build",
+      "command": "cmake --build build/verify --config Release --parallel 4 --clean-first",
+      "exitCode": 0,
+      "seconds": 6.9455872,
+      "compilerWarnings": 0,
+      "log": "native-build.log",
+      "sha256": "09d8af441424a5019afa145c41ce55e6322589cbeb4908329e01c5ccac6868c5",
+      "summaries": [],
+      "runLogSha256": "5f8d87d5c2fe3d3dd4c421a3b23b9fb33bc369cd35e76b11816f89bf3bd04fdb"
+    },
+    {
+      "name": "native-ctest",
+      "command": "ctest --test-dir build/verify -C Release --output-on-failure -V --output-junit {repo}\\build\\evidence-windows\\native-ctest.xml",
+      "exitCode": 0,
+      "seconds": 4.4892103,
+      "compilerWarnings": 0,
+      "log": "native-ctest.log",
+      "sha256": "9c3ba792ddf51f37e01b6249140d93e6146fb49769385610ae51c845dabfbf3d",
+      "summaries": [
+        "1: abi=96 kernel=SCALAR lanes=1 ledger=0 xlsx=1 reader=1 ranges=1 inflate=1 inflate_failures=0 failures=0\r",
+        "2: ALL PASS failures=0\r",
+        "3: ALL PASS failures=0\r",
+        "4: ALL PASS failures=0\r",
+        "5: report      = entries=5 cells_seen=200 loaded=200 unsupported=0 crc_failures=0\r",
+        "5: ALL PASS failures=0\r",
+        "7: cases       = 789 (accepted=26 rejected=763)\r",
+        "8: checks=23 failures=0\r",
+        "9: checks=170021 failures=0 kernel=SCALAR\r",
+        "10: checks=26 failures=0\r",
+        "11: checks=21 failures=0\r",
+        "12: failures=0\r",
+        "13: workbooks=100 mutations=2000 checks=279000 failures=0\r",
+        "15: checks=36 failures=0\r",
+        "16: checks=70 failures=0\r",
+        "17: checks=12089 failures=0\r",
+        "100% tests passed out of 17\r"
+      ],
+      "runLogSha256": "8a061a322704eda2dadbcdd87a92ac42fb497fd1a7b6564b9b2576081163365f"
+    },
+    {
+      "name": "desktop-build",
+      "command": "dotnet build src/KHZ.Sheet.Desktop/KHZ.Sheet.Desktop.csproj -c Release -warnaserror",
+      "exitCode": 0,
+      "seconds": 2.3739703,
+      "compilerWarnings": 0,
+      "log": "desktop-build.log",
+      "sha256": "6bf05458847669dc8ca09f8ba3ffaebe84a516ef135bb7df9a425526721b1c30",
+      "summaries": [],
+      "runLogSha256": "b15d658e3e49062ca6f0a42e2caf358480a431d0d841555279b4c6f66729dddf"
+    },
+    {
+      "name": "KhzExactLiteral",
+      "command": "dotnet run --project tests/dotnet/KhzExactLiteral/KhzExactLiteral.csproj -c Release",
+      "exitCode": 0,
+      "seconds": 2.5472128,
+      "compilerWarnings": 0,
+      "log": "KhzExactLiteral.log",
+      "sha256": "9c9bb2964be73e142cff20c9c1cd402f5b80dc8206102e669214df89e54edd9f",
+      "summaries": [
+        "cases    = 23\r",
+        "ALL PASS failures=0\r"
+      ],
+      "runLogSha256": "9c9bb2964be73e142cff20c9c1cd402f5b80dc8206102e669214df89e54edd9f"
+    },
+    {
+      "name": "KhzExactLiteral-dotnet-test",
+      "command": "dotnet test tests/dotnet/KhzExactLiteral/KhzExactLiteral.csproj -c Release --no-restore",
+      "exitCode": 0,
+      "seconds": 0.6875996,
+      "compilerWarnings": 0,
+      "log": "KhzExactLiteral-dotnet-test.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summaries": [],
+      "runLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "KhzFormulaCells",
+      "command": "dotnet run --project tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release",
+      "exitCode": 0,
+      "seconds": 2.3467959,
+      "compilerWarnings": 0,
+      "log": "KhzFormulaCells.log",
+      "sha256": "4d26c21eb25b8ae5a47947d8df92350c47bb6de59b4e8b713405be7d625a5bac",
+      "summaries": [
+        "ALL PASS failures=0\r"
+      ],
+      "runLogSha256": "4d26c21eb25b8ae5a47947d8df92350c47bb6de59b4e8b713405be7d625a5bac"
+    },
+    {
+      "name": "KhzFormulaCells-dotnet-test",
+      "command": "dotnet test tests/dotnet/KhzFormulaCells/KhzFormulaCells.csproj -c Release --no-restore",
+      "exitCode": 0,
+      "seconds": 0.6804091,
+      "compilerWarnings": 0,
+      "log": "KhzFormulaCells-dotnet-test.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summaries": [],
+      "runLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "KhzDependencyRewrite",
+      "command": "dotnet run --project tests/dotnet/KhzDependencyRewrite/KhzDependencyRewrite.csproj -c Release",
+      "exitCode": 0,
+      "seconds": 2.2659402,
+      "compilerWarnings": 0,
+      "log": "KhzDependencyRewrite.log",
+      "sha256": "1f4eada09c368750dc721d1a7eb92bdc4c75588acfe9ba45fcfbe0af218a3414",
+      "summaries": [
+        "ALL PASS failures=0\r"
+      ],
+      "runLogSha256": "1f4eada09c368750dc721d1a7eb92bdc4c75588acfe9ba45fcfbe0af218a3414"
+    },
+    {
+      "name": "KhzDependencyRewrite-dotnet-test",
+      "command": "dotnet test tests/dotnet/KhzDependencyRewrite/KhzDependencyRewrite.csproj -c Release --no-restore",
+      "exitCode": 0,
+      "seconds": 0.6844028,
+      "compilerWarnings": 0,
+      "log": "KhzDependencyRewrite-dotnet-test.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summaries": [],
+      "runLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "KhzOpcPackage",
+      "command": "dotnet run --project tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj -c Release",
+      "exitCode": 0,
+      "seconds": 2.3215483,
+      "compilerWarnings": 0,
+      "log": "KhzOpcPackage.log",
+      "sha256": "c232b662889e6f4374ae9f071d91a219a935346e4f2fb824685cd5598e7b9f5c",
+      "summaries": [
+        "ALL PASS failures=0\r"
+      ],
+      "runLogSha256": "c232b662889e6f4374ae9f071d91a219a935346e4f2fb824685cd5598e7b9f5c"
+    },
+    {
+      "name": "KhzOpcPackage-dotnet-test",
+      "command": "dotnet test tests/dotnet/KhzOpcPackage/KhzOpcPackage.csproj -c Release --no-restore",
+      "exitCode": 0,
+      "seconds": 0.687976,
+      "compilerWarnings": 0,
+      "log": "KhzOpcPackage-dotnet-test.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summaries": [],
+      "runLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "KhzDesktopContracts",
+      "command": "dotnet run --project tests/dotnet/KhzDesktopContracts/KhzDesktopContracts.csproj -c Release",
+      "exitCode": 0,
+      "seconds": 3.4696552,
+      "compilerWarnings": 0,
+      "log": "KhzDesktopContracts.log",
+      "sha256": "b41111db642b08482e9988bd750cff2d5dd16af7b20cd46b1945ddaf4204d38d",
+      "summaries": [
+        "failures=0\r"
+      ],
+      "runLogSha256": "b41111db642b08482e9988bd750cff2d5dd16af7b20cd46b1945ddaf4204d38d"
+    },
+    {
+      "name": "KhzDesktopContracts-dotnet-test",
+      "command": "dotnet test tests/dotnet/KhzDesktopContracts/KhzDesktopContracts.csproj -c Release --no-restore",
+      "exitCode": 0,
+      "seconds": 0.6729889,
+      "compilerWarnings": 0,
+      "log": "KhzDesktopContracts-dotnet-test.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summaries": [],
+      "runLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "KhzBoundaryContracts",
+      "command": "dotnet run --project tests/dotnet/KhzBoundaryContracts/KhzBoundaryContracts.csproj -c Release",
+      "exitCode": 0,
+      "seconds": 2.3297105,
+      "compilerWarnings": 0,
+      "log": "KhzBoundaryContracts.log",
+      "sha256": "ee1d9ff76a79e45654e44b5c7f2ea8060c1c781eb8b096b51c39835f38bf9511",
+      "summaries": [
+        "failures=0\r"
+      ],
+      "runLogSha256": "ee1d9ff76a79e45654e44b5c7f2ea8060c1c781eb8b096b51c39835f38bf9511"
+    },
+    {
+      "name": "KhzBoundaryContracts-dotnet-test",
+      "command": "dotnet test tests/dotnet/KhzBoundaryContracts/KhzBoundaryContracts.csproj -c Release --no-restore",
+      "exitCode": 0,
+      "seconds": 0.6623144,
+      "compilerWarnings": 0,
+      "log": "KhzBoundaryContracts-dotnet-test.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summaries": [],
+      "runLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "KhzSubsystemContracts",
+      "command": "dotnet run --project tests/dotnet/KhzSubsystemContracts/KhzSubsystemContracts.csproj -c Release",
+      "exitCode": 0,
+      "seconds": 8.4350411,
+      "compilerWarnings": 0,
+      "log": "KhzSubsystemContracts.log",
+      "sha256": "be0f8ae1a8978468e527aefc637693a17e0704ffb1b8c1055d0e3a61b58b6aaf",
+      "summaries": [
+        "checks=215 failures=0\r"
+      ],
+      "runLogSha256": "c00bc0e2f27284b98b8d1bb49794ddae7349c937059800f2e1d7b9c99caed8d6"
+    },
+    {
+      "name": "KhzSubsystemContracts-dotnet-test",
+      "command": "dotnet test tests/dotnet/KhzSubsystemContracts/KhzSubsystemContracts.csproj -c Release --no-restore",
+      "exitCode": 0,
+      "seconds": 0.7822584,
+      "compilerWarnings": 0,
+      "log": "KhzSubsystemContracts-dotnet-test.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summaries": [],
+      "runLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "boundary-race",
+      "command": "dotnet run --project tests/dotnet/KhzBoundaryContracts/KhzBoundaryContracts.csproj -c Release --no-build -- race {repo}\\build\\verify\\Release\\khz_sheet.dll",
+      "exitCode": 0,
+      "seconds": 1.1643005,
+      "compilerWarnings": 0,
+      "log": "boundary-race.log",
+      "sha256": "d3cd654b9a9374deb3842a6038c0694ceb8a4cd2d791256bca2ac01bcf98be6b",
+      "summaries": [
+        "failures=0\r"
+      ],
+      "runLogSha256": "d3cd654b9a9374deb3842a6038c0694ceb8a4cd2d791256bca2ac01bcf98be6b"
+    },
+    {
+      "name": "boundary-bad-image",
+      "command": "dotnet run --project tests/dotnet/KhzBoundaryContracts/KhzBoundaryContracts.csproj -c Release --no-build -- bad-image",
+      "exitCode": 0,
+      "seconds": 1.0183116,
+      "compilerWarnings": 0,
+      "log": "boundary-bad-image.log",
+      "sha256": "c5b0d7ed122efb3be28e2721729d0a032442837d1ca3ce49eb85187cc8fcf682",
+      "summaries": [],
+      "runLogSha256": "c5b0d7ed122efb3be28e2721729d0a032442837d1ca3ce49eb85187cc8fcf682"
+    },
+    {
+      "name": "presentation-oracle",
+      "command": "python tests/khz_presentation_oracle.py {repo}\\build\\evidence-windows\\ui\\khz-subsystems-13797c58f3504d7aa5bacacb62dc00a7",
+      "exitCode": 0,
+      "seconds": 0.7803609,
+      "compilerWarnings": 0,
+      "log": "presentation-oracle.log",
+      "sha256": "3fe714f4eb4b9c1945bc15015c76e52f8e349e483b1969c3d4d1ed8fb828f6e8",
+      "summaries": [],
+      "runLogSha256": "3fe714f4eb4b9c1945bc15015c76e52f8e349e483b1969c3d4d1ed8fb828f6e8"
+    }
+  ],
+  "success": true,
+  "desktopSmoke": "PASS: release executable opened a responsive main window",
+  "nativeDllSha256": "11773bd65d27be20b74b6400f83f025a336d45ae37996495d435e8ebcc2b2f08",
+  "desktopExeSha256": "1d3130cd5738a8eb71225d163ee9cc4f1a94b5cd898eb5a704204036ad856129",
+  "finishedUtc": "2026-09-30T19:46:28.4806722Z",
+  "implementationCommit": "5b84d2b563775b85ff14b26f6b857858e73242e5",
+  "normalization": "Machine-specific paths replaced; step sha256 identifies the published normalized log; runLogSha256 identifies the original run log."
+}

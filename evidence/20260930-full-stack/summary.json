@@ -1,0 +1,49 @@
+{
+  "implementationCommit": "5b84d2b563775b85ff14b26f6b857858e73242e5",
+  "testBaseCommit": "b7024c2364357bdf8714f5f8a2c391353e354764",
+  "sourceManifestSha256": "f2a6bd257a1bc11f5d97deacdbcbd780b5ac6045b55acc50d2a719416580be70",
+  "sourceManifestVerifiedAfterTests": true,
+  "windowsNative": {
+    "disabled": 0,
+    "failures": 0,
+    "tests": 17
+  },
+  "linuxGcc": {
+    "tests": 18,
+    "failures": 0,
+    "disabled": 0
+  },
+  "linuxClangAsanUbsan": {
+    "tests": 16,
+    "failures": 0,
+    "disabled": 0
+  },
+  "compilerWarnings": 0,
+  "managedConsoleRunners": 7,
+  "managedFailures": 0,
+  "subsystemChecks": 215,
+  "dotnetTestFrameworkCases": 0,
+  "dotnetTestNote": "Console assertion runners: dotnet run executes checks; dotnet test discovers no test-framework cases.",
+  "presentationOracle": {
+    "reader": "openpyxl",
+    "version": "3.1.5",
+    "workbooks": 9,
+    "checks": 259,
+    "failures": 0
+  },
+  "desktopSmoke": "PASS: release executable opened a responsive main window",
+  "binariesSha256": {
+    "KHZ.Sheet.exe": "1d3130cd5738a8eb71225d163ee9cc4f1a94b5cd898eb5a704204036ad856129",
+    "KHZ.Sheet.dll": "dda3cea8b5c4e6caf32dbd51c1bc2b9a97c15da61f8eb5b085e237e9b33f9641",
+    "KHZ.Sheet.Core.dll": "9f92b167e22d79ce2737bae694e1ba510097c1de4fc828743e0788605d6a0756",
+    "khz_sheet.dll": "11773bd65d27be20b74b6400f83f025a336d45ae37996495d435e8ebcc2b2f08"
+  },
+  "humanBenefitMeasured": false,
+  "boundaries": [
+    "Canonical single-worksheet desktop import, 256 rows by 52 columns; unsupported parts/features refused.",
+    "XLSX numeric values and chart caches may round; native arithmetic remains exact.",
+    "Table sorting is a coordinate-preserving view; export retains original coordinate order.",
+    "Automatic totals and import start a new native proof history; presentation metadata is outside cell proofs.",
+    "Openpyxl parsing and WPF receipts are not general Excel fidelity or arbitrary-hostile-XLSX guarantees."
+  ]
+}

@@ -1,0 +1,59 @@
+abi      = Ok (ok, native ABI 96, retroactive ranges)
+create   = Ok
+dependency formula:
+  OK   A1 = 10
+  OK   A2 = 20
+  OK   B1 accepted as =SUM(A1:A2)
+  OK   recalculate -> Ok
+  OK   evaluated = 1
+  OK   read B1 -> Ok
+  OK   B1 = 30, expected 30/1
+  OK   B1 committed onto the chain
+  OK   A1 = 15
+  OK   B1 dirty after A1 changed
+  OK   recalculate -> Ok
+  note evaluated = 1
+  OK   B1 = 35 after A1 = 15, expected 35/1
+aggregate cell references:
+  OK   J1 = text
+  OK   J2 = TRUE
+  OK   J3 = 7
+  OK   K1 = SUM(J1,J2,J3)
+  OK   K2 = AVERAGE(J1,J2,J3)
+  OK   K3 = MIN(J1,J2,J3)
+  OK   K4 = MAX(J1,J2,J3)
+  OK   K5 = AVERAGE(blank reference)
+  OK   aggregate recalculate -> Ok
+  OK   aggregate evaluated = 5
+  OK   K1 ignores text/logical references and equals 7/1
+  OK   K2 ignores text/logical references and equals 7/1
+  OK   K3 ignores text/logical references and equals 7/1
+  OK   K4 ignores text/logical references and equals 7/1
+  OK   K5 = #DIV/0! when AVERAGE has no numeric reference values
+native source power parser:
+  OK   C1 accepted as =2^3
+  OK   D1 accepted as =2^-3
+  OK   E1 accepted as =2^0.5
+  OK   power recalculate -> Ok
+  OK   power evaluated = 3
+  OK   C1 = 8/1
+  OK   D1 = 1/8
+  OK   E1 = #NUM! for fractional exponent
+native source numeric parity:
+  OK   F1 accepted as =1e3
+  OK   G1 accepted as =2.5E-4
+  OK   H1 accepted as =50%
+  OK   I1 accepted as =0.5%
+  OK   numeric parity recalculate -> Ok
+  OK   numeric parity evaluated = 4
+  OK   F1 = 1000/1
+  OK   G1 = 1/4000
+  OK   H1 = 1/2
+  OK   I1 = 1/200
+chain:
+  OK   verify chain -> Ok, failed index 0
+  OK   proof = 250403bc2654005592a9793ebdcc0cdf5bb3e2a39c96d4a8566755cb3f45a9a5
+arena:
+  note used = 1102789, capacity = 4194304, peak = 1103632, allocations = 165
+  OK   arena rejections = 0
+ALL PASS failures=0

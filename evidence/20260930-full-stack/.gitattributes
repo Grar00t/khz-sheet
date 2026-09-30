@@ -1,0 +1,4 @@
+# Preserve machine receipt bytes, including original line endings.
+* -text whitespace=cr-at-eol
+*.log -whitespace
+*.xml -whitespace

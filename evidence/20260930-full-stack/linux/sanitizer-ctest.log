@@ -1,0 +1,173 @@
+UpdateCTestConfiguration  from :{linux-build}/sanitize/DartConfiguration.tcl
+Test project {linux-build}/sanitize
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 1
+      Start  1: khz_selftest
+
+1: Test command: {linux-build}/sanitize/khz_selftest
+1: Working Directory: {linux-build}/sanitize
+1: Test timeout computed to be: 10000000
+1: abi=96 kernel=SCALAR lanes=1 ledger=0 xlsx=1 reader=1 ranges=1 inflate=1 inflate_failures=0 failures=0
+ 1/16 Test  #1: khz_selftest .....................   Passed    0.01 sec
+test 2
+      Start  2: khz_sheet_failure_test
+
+2: Test command: {linux-build}/sanitize/khz_sheet_failure_test
+2: Working Directory: {linux-build}/sanitize
+2: Test timeout computed to be: 10000000
+2: ALL PASS failures=0
+ 2/16 Test  #2: khz_sheet_failure_test ...........   Passed    0.01 sec
+test 3
+      Start  3: khz_sheet_proof_tamper_test
+
+3: Test command: {linux-build}/sanitize/khz_sheet_proof_tamper_test
+3: Working Directory: {linux-build}/sanitize
+3: Test timeout computed to be: 10000000
+3: ALL PASS failures=0
+ 3/16 Test  #3: khz_sheet_proof_tamper_test ......   Passed    0.01 sec
+test 4
+      Start  4: khz_xlsx_writer_test
+
+4: Test command: {linux-build}/sanitize/khz_xlsx_writer_test
+4: Working Directory: {linux-build}/sanitize
+4: Test timeout computed to be: 10000000
+4: ALL PASS failures=0
+ 4/16 Test  #4: khz_xlsx_writer_test .............   Passed    0.01 sec
+test 5
+      Start  5: khz_xlsx_test
+
+5: Test command: {linux-build}/sanitize/khz_xlsx_test "{linux-build}/sanitize/khz_fixture.xlsx"
+5: Working Directory: {linux-build}/sanitize
+5: Test timeout computed to be: 10000000
+5: fixture     = {linux-build}/sanitize/khz_fixture.xlsx (2201 bytes)
+5: read        = OK
+5: entries     = 5
+5: report      = entries=5 cells_seen=200 loaded=200 unsupported=0 crc_failures=0
+5: cells       = 200 (expect 200)
+5: sum         = OK 26700/1 counted=200 (expect 26700/1 over 200)
+5: avg         = OK 267/2 counted=200
+5: chain       = OK failed_index=0 commits=200
+5: audit       = examined=200 verified=200 superseded=0 dropped=0
+5: proof       = b7e295b1430eb825947b207f9174b725d87e1377fd9e31502f763958775c3357
+5: arena       = used=17578010 peak=17579648 rejections=0 kernel=SCALAR lanes=1
+5: reset       = ERR_STATE (shared sheet arena)
+5: ALL PASS failures=0
+ 5/16 Test  #5: khz_xlsx_test ....................   Passed    0.03 sec
+test 6
+      Start  6: khz_xlsx_cd_size_test
+
+6: Test command: {linux-build}/sanitize/khz_xlsx_cd_size_test "{linux-build}/sanitize/khz_fixture.xlsx"
+6: Working Directory: {linux-build}/sanitize
+6: Test timeout computed to be: 10000000
+6: ALL PASS strict central-directory and EOCD framing checks
+ 6/16 Test  #6: khz_xlsx_cd_size_test ............   Passed    0.01 sec
+test 7
+      Start  7: khz_fuzz_test
+
+7: Test command: {linux-build}/sanitize/khz_fuzz_test "{linux-build}/sanitize/khz_fixture.xlsx"
+7: Working Directory: {linux-build}/sanitize
+7: Test timeout computed to be: 10000000
+7: fixture     = {linux-build}/sanitize/khz_fixture.xlsx (2201 bytes)
+7: baseline    = OK
+7: cases       = 789 (accepted=26 rejected=763)
+7: ALL PASS defects=0
+ 7/16 Test  #7: khz_fuzz_test ....................   Passed    5.22 sec
+test 8
+      Start  8: khz_formula_boundary_test
+
+8: Test command: {linux-build}/sanitize/khz_formula_boundary_test
+8: Working Directory: {linux-build}/sanitize
+8: Test timeout computed to be: 10000000
+8: checks=23 failures=0
+ 8/16 Test  #8: khz_formula_boundary_test ........   Passed    0.01 sec
+test 9
+      Start  9: khz_numeric_boundary_test
+
+9: Test command: {linux-build}/sanitize/khz_numeric_boundary_test
+9: Working Directory: {linux-build}/sanitize
+9: Test timeout computed to be: 10000000
+9: checks=170021 failures=0 kernel=SCALAR
+ 9/16 Test  #9: khz_numeric_boundary_test ........   Passed    0.09 sec
+test 10
+      Start 10: khz_formula_transaction_test
+
+10: Test command: {linux-build}/sanitize/khz_formula_transaction_test
+10: Working Directory: {linux-build}/sanitize
+10: Test timeout computed to be: 10000000
+10: checks=26 failures=0
+10/16 Test #10: khz_formula_transaction_test .....   Passed    0.01 sec
+test 11
+      Start 11: khz_dependency_retry_test
+
+11: Test command: {linux-build}/sanitize/khz_dependency_retry_test
+11: Working Directory: {linux-build}/sanitize
+11: Test timeout computed to be: 10000000
+11: checks=21 failures=0
+11/16 Test #11: khz_dependency_retry_test ........   Passed    0.01 sec
+test 12
+      Start 12: khz_zip_boundary_test
+
+12: Test command: {linux-build}/sanitize/khz_zip_boundary_test
+12: Working Directory: {linux-build}/sanitize
+12: Test timeout computed to be: 10000000
+12: PASS valid stored entries status=0 expected=0
+12: PASS local CRC conflict status=-3 expected=-3
+12: PASS local size conflict status=-3 expected=-3
+12: PASS local flags conflict status=-3 expected=-3
+12: PASS encryption unsupported status=-6 expected=-6
+12: PASS member on another disk status=-6 expected=-6
+12: PASS duplicate member status=-3 expected=-3
+12: PASS ASCII case collision status=-3 expected=-3
+12: PASS shared local record status=-3 expected=-3
+12: PASS parent path status=-3 expected=-3
+12: PASS embedded NUL status=-3 expected=-3
+12: PASS backslash ambiguity status=-3 expected=-3
+12: PASS overlapping different members status=-3 expected=-3
+12: PASS compression ratio ceiling before decode status=-4 expected=-4
+12: PASS unsigned descriptor status=0 expected=0
+12: PASS conflicting descriptor status=-3 expected=-3
+12: PASS signed descriptor status=0 expected=0
+12: PASS conflicting descriptor status=-3 expected=-3
+12: failures=0
+12/16 Test #12: khz_zip_boundary_test ............   Passed    0.01 sec
+test 13
+      Start 13: khz_recalc_property_test
+
+13: Test command: {linux-build}/sanitize/khz_recalc_property_test
+13: Working Directory: {linux-build}/sanitize
+13: Test timeout computed to be: 10000000
+13: workbooks=100 mutations=2000 checks=279000 failures=0
+13/16 Test #13: khz_recalc_property_test .........   Passed    2.72 sec
+test 14
+      Start 14: khz_xlsx_formula_cache_test
+
+14: Test command: {linux-build}/sanitize/khz_xlsx_formula_cache_test
+14: Working Directory: {linux-build}/sanitize
+14: Test timeout computed to be: 10000000
+14: checks=36 failures=0
+14/16 Test #14: khz_xlsx_formula_cache_test ......   Passed    0.01 sec
+test 15
+      Start 15: khz_xlsx_resilience_test
+
+15: Test command: {linux-build}/sanitize/khz_xlsx_resilience_test
+15: Working Directory: {linux-build}/sanitize
+15: Test timeout computed to be: 10000000
+15: checks=70 failures=0
+15/16 Test #15: khz_xlsx_resilience_test .........   Passed    0.01 sec
+test 16
+      Start 16: khz_formula_extended_test
+
+16: Test command: {linux-build}/sanitize/khz_formula_extended_test
+16: Working Directory: {linux-build}/sanitize
+16: Test timeout computed to be: 10000000
+16: checks=12089 failures=0
+16/16 Test #16: khz_formula_extended_test ........   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 16
+
+Total Test time (real) =   8.21 sec

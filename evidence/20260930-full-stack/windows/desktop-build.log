@@ -1,0 +1,10 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  KHZ.Sheet.Core -> {repo}\src\KHZ.Sheet.Core\bin\Release\net8.0\KHZ.Sheet.Core.dll
+  KHZ.Sheet.Desktop -> {repo}\src\KHZ.Sheet.Desktop\bin\Release\net8.0-windows\KHZ.Sheet.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:02.01
