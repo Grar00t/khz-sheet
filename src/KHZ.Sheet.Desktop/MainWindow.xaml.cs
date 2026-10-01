@@ -2,6 +2,7 @@ using System.Data;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -14,8 +15,10 @@ namespace KHZ.Sheet.Desktop;
 public partial class MainWindow : Window
 {
     private readonly WorkbookSession _workbook = new();
+    private readonly DispatcherTimer _headerSelectionTimer = new() { Interval = TimeSpan.FromMilliseconds(35) };
     private bool _rebinding;
     private bool _formatControlReady;
+    private string? _editError;
 
     private sealed record ColorChoice(string Name, string? Hex);
     private sealed record NumberFormatChoice(string Name, CellNumberFormat Format);
@@ -23,7 +26,12 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        SheetGrid.AddHandler(FrameworkElement.LoadedEvent, new RoutedEventHandler(DataGridCell_Loaded));
+        _headerSelectionTimer.Tick += (_, _) =>
+        {
+            _headerSelectionTimer.Stop();
+            UpdateHeaderSelection();
+        };
+        SheetGrid.AddHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(SheetGrid_ColumnResizeCompleted));
         InitializeFormattingControls();
         ThemeBox.ItemsSource = SheetTheme.Presets; ThemeBox.DisplayMemberPath = nameof(SheetTheme.Name);
         ChartKindBox.ItemsSource = Enum.GetValues<ChartKind>(); ChartKindBox.SelectedIndex = 1;
@@ -90,6 +98,7 @@ public partial class MainWindow : Window
         _rebinding = true;
         try
         {
+            _editError = null;
             SheetGrid.AutoGenerateColumns = true;
             SheetGrid.ItemsSource = sheet.Grid.DefaultView;
             SheetGrid.FrozenColumnCount = sheet.FrozenColumns;
@@ -101,6 +110,7 @@ public partial class MainWindow : Window
             FormulaBox.Text = string.Empty;
             SetStatus($"sheet · {sheet.Name}");
             RefreshEngineText();
+            UpdateErrorBanner();
         }
         finally
         {
@@ -233,8 +243,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        sheet.Recalculate(out string message);
+        bool ok = sheet.Recalculate(out string message);
         SetStatus(message);
+        if (ok) ClearEditError(); else ShowEditError(message);
         RefreshEngineText();
     }
 
@@ -246,8 +257,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        sheet.Verify(out string message);
+        bool ok = sheet.Verify(out string message);
         SetStatus(message);
+        if (ok) ClearEditError(); else ShowEditError(message);
         RefreshEngineText();
     }
 
@@ -358,10 +370,12 @@ public partial class MainWindow : Window
 
         if (sheet.CommitCell(row, column, FormulaBox.Text, out string message))
         {
+            ClearEditError();
             SetStatus(message);
         }
         else
         {
+            ShowEditError($"cell {CellName(row, column)} · {message}");
             SetStatus($"cell {CellName(row, column)} · {message}");
         }
 
@@ -374,6 +388,19 @@ public partial class MainWindow : Window
         int index = CurrentSheet is not null && e.Row.Item is DataRowView v ? CurrentSheet.Grid.Rows.IndexOf(v.Row) : e.Row.GetIndex();
         e.Row.Header = (index + 1).ToString();
         e.Row.Height = CurrentSheet?.RowHeights.TryGetValue(index,out double height)==true ? height*96/72 : double.NaN;
+        e.Row.Loaded -= SheetGrid_RowLoaded;
+        e.Row.Loaded += SheetGrid_RowLoaded;
+        QueueHeaderSelectionUpdate();
+    }
+
+    private void SheetGrid_RowLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not DataGridRow row) return;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            foreach (DataGridCell cell in FindVisualChildren<DataGridCell>(row))
+                ApplyCellVisualFormat(cell);
+        }));
     }
 
     private void SheetGrid_AutoGeneratingColumn(object sender, DataGridAutoGeneratingColumnEventArgs e)
@@ -393,7 +420,7 @@ public partial class MainWindow : Window
 
         UpdateFormulaBar();
         RefreshRealizedCellStyles();
-        UpdateHeaderSelection();
+        QueueHeaderSelectionUpdate();
     }
 
     private void UpdateFormulaBar()
@@ -429,12 +456,15 @@ public partial class MainWindow : Window
             {
                 if (sheet.CommitCell(row, column, value, out string message))
                 {
+                    ClearEditError();
                     SetStatus(message);
                 }
                 else
                 {
                     sheet.Grid.Rows[row][column] = sheet.RenderInput(row, column);
-                    SetStatus($"cell {CellName(row, column)} · {message}");
+                    string error = $"cell {CellName(row, column)} · {message}";
+                    ShowEditError(error);
+                    SetStatus(error);
                 }
 
                 FormulaBox.Text = sheet.GetInput(row, column);
@@ -647,7 +677,7 @@ public partial class MainWindow : Window
 
     private void DataGridCell_Loaded(object sender, RoutedEventArgs e)
     {
-        if (e.OriginalSource is DataGridCell cell) ApplyCellVisualFormat(cell);
+        if (sender is DataGridCell cell) ApplyCellVisualFormat(cell);
     }
 
     private void ApplyCellVisualFormat(DataGridCell cell)
@@ -758,6 +788,46 @@ public partial class MainWindow : Window
     private void RefreshEngineText()
     {
         EngineText.Text = CurrentSheet?.EngineSummary ?? "no sheet";
+        UpdateEngineCommandState();
+        UpdateErrorBanner();
+    }
+
+    private void UpdateEngineCommandState()
+    {
+        bool available = CurrentSheet?.EngineAvailable == true;
+        RecalculateButton.IsEnabled = available;
+        VerifyButton.IsEnabled = available;
+        CopyProofButton.IsEnabled = available;
+        ExportXlsxButton.IsEnabled = available;
+        TableTotalsButton.IsEnabled = available;
+        AddChartButton.IsEnabled = available;
+        ViewChartsButton.IsEnabled = available;
+    }
+
+    private void UpdateErrorBanner()
+    {
+        string engineError = CurrentSheet is { EngineAvailable: false } sheet ? sheet.EngineLoadError ?? sheet.EngineSummary : string.Empty;
+        string text = string.Join(Environment.NewLine, new[] { engineError, _editError }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        ErrorBannerText.Text = text;
+        ErrorBanner.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ShowEditError(string message)
+    {
+        _editError = message;
+        UpdateErrorBanner();
+    }
+
+    private void ClearEditError()
+    {
+        _editError = null;
+        UpdateErrorBanner();
+    }
+
+    private void QueueHeaderSelectionUpdate()
+    {
+        _headerSelectionTimer.Stop();
+        _headerSelectionTimer.Start();
     }
 
     private void SetStatus(string message)

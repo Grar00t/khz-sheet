@@ -156,12 +156,21 @@ public static class CellVisualFormat
         if (format.VerticalAlignment is CellVerticalAlignment vertical)
             cell.VerticalContentAlignment = vertical switch { CellVerticalAlignment.Top => System.Windows.VerticalAlignment.Top,
                 CellVerticalAlignment.Center => System.Windows.VerticalAlignment.Center, _ => System.Windows.VerticalAlignment.Bottom };
+        if (IsErrorCell(baseText))
+        {
+            cell.Background = Brush("#4A1F24");
+            cell.Foreground = Brush("#FF7B72");
+            cell.FontWeight = FontWeights.Bold;
+        }
         if (cell.IsSelected)
         {
             cell.Background = cell.TryFindResource("SelectionBrush") as Brush ?? Brush("#1F6FEB");
             cell.Foreground = cell.TryFindResource("SelectedTextBrush") as Brush ?? Brushes.White;
         }
     }
+
+    private static bool IsErrorCell(string? value) => value is
+        "#NULL!" or "#DIV/0!" or "#VALUE!" or "#REF!" or "#NAME?" or "#NUM!" or "#N/A" or "#ERROR!";
 
     private static void Reset(DataGridCell cell)
     {

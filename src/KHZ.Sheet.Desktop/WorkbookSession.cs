@@ -90,26 +90,40 @@ public sealed partial class WorksheetSession : IDisposable
     private sealed record TableEdit(TableFormat Table) : WorksheetEdit;
     private readonly record struct FormatChange(long Key, CellFormat? Before, CellFormat? After);
 
-    public WorksheetSession(string name)
+    public WorksheetSession(string name) : this(name, initializeEngine: true, loadError: null)
+    {
+    }
+
+    internal WorksheetSession(string name, bool initializeEngine, string? loadError)
     {
         Name = name;
         Grid = CreateGrid(DefaultRows, DefaultColumns);
+
+        if (!initializeEngine)
+        {
+            EngineStatus = SheetStatus.ErrState;
+            EngineLoadError = loadError ?? "khz_sheet.dll is unavailable.";
+            return;
+        }
 
         try
         {
             EngineStatus = NativeSheet.TryCreate(ArenaBytes, CellCapacity, out _native);
         }
-        catch (DllNotFoundException)
+        catch (DllNotFoundException ex)
         {
             EngineStatus = SheetStatus.ErrState;
+            EngineLoadError = $"Could not load khz_sheet.dll or the required VC++ runtime: {ex.Message}";
         }
-        catch (BadImageFormatException)
+        catch (BadImageFormatException ex)
         {
             EngineStatus = SheetStatus.ErrState;
+            EngineLoadError = $"khz_sheet.dll architecture does not match the desktop process: {ex.Message}";
         }
-        catch (EntryPointNotFoundException)
+        catch (EntryPointNotFoundException ex)
         {
             EngineStatus = SheetStatus.ErrUnsupported;
+            EngineLoadError = $"khz_sheet.dll ABI entry point is unavailable: {ex.Message}";
         }
     }
 
@@ -118,6 +132,8 @@ public sealed partial class WorksheetSession : IDisposable
     public DataTable Grid { get; }
 
     public SheetStatus EngineStatus { get; private set; }
+
+    public string? EngineLoadError { get; }
 
     public bool EngineAvailable => EngineStatus == SheetStatus.Ok && _native is not null;
 
@@ -173,9 +189,15 @@ public sealed partial class WorksheetSession : IDisposable
 
         if (!EngineAvailable)
         {
+            if (RequiresCalculation(raw))
+            {
+                message = EngineLoadError ?? EngineSummary;
+                return false;
+            }
+
             _inputs[Key(row, column)] = raw;
             Grid.Rows[row][column] = raw;
-            message = EngineSummary;
+            message = "text stored · " + EngineSummary;
             return true;
         }
 
@@ -889,6 +911,21 @@ public sealed partial class WorksheetSession : IDisposable
                 error = CellErrorCode.None;
                 return false;
         }
+    }
+
+    private static bool RequiresCalculation(string raw)
+    {
+        string value = raw.Trim();
+        if (value.StartsWith('=') ||
+            string.Equals(value, "TRUE", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "FALSE", StringComparison.OrdinalIgnoreCase) ||
+            TryCellError(value, out _))
+        {
+            return true;
+        }
+
+        SheetStatus status = TryParseExactNumber(value, out _, out _, out bool recognized);
+        return recognized || status != SheetStatus.Ok;
     }
 
     private static string ErrorText(CellErrorCode error) =>

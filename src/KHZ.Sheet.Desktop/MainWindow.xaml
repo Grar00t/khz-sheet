@@ -19,6 +19,7 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
@@ -72,7 +73,7 @@
                 <Button Content="Open XLSX" Click="OpenXlsx_Click"/>
                 <Button Content="Open CSV" Click="OpenCsv_Click"/>
                 <Button Content="Save CSV" Click="SaveCsv_Click"/>
-                <Button Content="Export XLSX" Click="ExportXlsx_Click"/>
+                <Button x:Name="ExportXlsxButton" Content="Export XLSX" Click="ExportXlsx_Click"/>
                 <Separator Width="12" Opacity="0"/>
                 <Button Content="Undo" Click="Undo_Click" ToolTip="Ctrl+Z"/>
                 <Button Content="Redo" Click="Redo_Click" ToolTip="Ctrl+Y"/>
@@ -81,9 +82,9 @@
                 <TextBox x:Name="FindBox" Width="170" Margin="0,0,6,0" ToolTip="Find in cell inputs · Ctrl+F"/>
                 <Button Content="Find Next" Click="FindNext_Click"/>
                 <Separator Width="12" Opacity="0"/>
-                <Button Content="Recalculate" Click="Recalculate_Click"/>
-                <Button Content="Verify Proof" Click="Verify_Click" Style="{StaticResource AccentButton}"/>
-                <Button Content="Copy Proof" Click="CopyProof_Click"/>
+                <Button x:Name="RecalculateButton" Content="Recalculate" Click="Recalculate_Click"/>
+                <Button x:Name="VerifyButton" Content="Verify Proof" Click="Verify_Click" Style="{StaticResource AccentButton}"/>
+                <Button x:Name="CopyProofButton" Content="Copy Proof" Click="CopyProof_Click"/>
             </WrapPanel>
         </Border>
 
@@ -109,14 +110,14 @@
                 <Button Content="Borders" Click="Borders_Click"/>
                 <Button Content="Table Style" Click="TableStyle_Click"/>
                 <Button Content="Create Table" Click="CreateTable_Click"/>
-                <Button Content="Table + Totals" Click="CreateTableTotals_Click" ToolTip="Create a table and add an exact SUM row below the selected data"/>
+                <Button x:Name="TableTotalsButton" Content="Table + Totals" Click="CreateTableTotals_Click" ToolTip="Create a table and add an exact SUM row below the selected data"/>
                 <Button Content="Sort ↑" Click="SortAscending_Click" ToolTip="Sort table view; row numbers remain native coordinates"/>
                 <Button Content="Sort ↓" Click="SortDescending_Click"/>
                 <Button Content="Original Order" Click="ResetSort_Click"/>
                 <ComboBox x:Name="ThemeBox" Width="165" SelectionChanged="ThemeBox_SelectionChanged" ToolTip="Worksheet theme"/>
                 <ComboBox x:Name="ChartKindBox" Width="85" ToolTip="Chart type"/>
-                <Button Content="Add Chart" Click="AddChart_Click"/>
-                <Button Content="Charts" Click="ViewCharts_Click"/>
+                <Button x:Name="AddChartButton" Content="Add Chart" Click="AddChart_Click"/>
+                <Button x:Name="ViewChartsButton" Content="Charts" Click="ViewCharts_Click"/>
                 <TextBox x:Name="RowHeightBox" Width="45" Text="24" ToolTip="Row height in points"/>
                 <Button Content="Row Height" Click="RowHeight_Click"/>
                 <Button Content="Clear Format" Click="ClearFormat_Click"/>
@@ -165,8 +166,18 @@
             </Grid>
         </Border>
 
+        <Border x:Name="ErrorBanner"
+                Grid.Row="4"
+                Background="#4A1F24"
+                BorderBrush="#FF7B72"
+                BorderThickness="0,0,0,1"
+                Padding="10,6"
+                Visibility="Collapsed">
+            <TextBlock x:Name="ErrorBannerText" Foreground="White" TextWrapping="Wrap"/>
+        </Border>
+
         <DataGrid x:Name="SheetGrid"
-                  Grid.Row="4"
+                  Grid.Row="5"
                   ItemsSource="{Binding}"
                   AutoGenerateColumns="True"
                   RowHeaderWidth="52"
@@ -179,14 +190,19 @@
                   SelectedCellsChanged="SheetGrid_SelectedCellsChanged"
                   CellEditEnding="SheetGrid_CellEditEnding"
                   PreviewKeyDown="SheetGrid_PreviewKeyDown"
-                  PreviewMouseLeftButtonUp="SheetGrid_MouseUp"
                   SelectionUnit="Cell"
                   SelectionMode="Extended"
                   ScrollViewer.CanContentScroll="True"
                   VirtualizingPanel.IsVirtualizing="True"
-                  VirtualizingPanel.VirtualizationMode="Recycling"/>
+                  VirtualizingPanel.VirtualizationMode="Recycling">
+            <DataGrid.CellStyle>
+                <Style TargetType="DataGridCell" BasedOn="{StaticResource {x:Type DataGridCell}}">
+                    <EventSetter Event="Loaded" Handler="DataGridCell_Loaded"/>
+                </Style>
+            </DataGrid.CellStyle>
+        </DataGrid>
 
-        <Border Grid.Row="5"
+        <Border Grid.Row="6"
                 Background="{DynamicResource PanelBrush}"
                 BorderBrush="{DynamicResource GridBrush}"
                 BorderThickness="0,1,0,0"
@@ -253,7 +269,7 @@
             </DockPanel>
         </Border>
 
-        <Border Grid.Row="6"
+        <Border Grid.Row="7"
                 Background="{DynamicResource PanelBrush}"
                 BorderBrush="{DynamicResource GridBrush}"
                 BorderThickness="0,1,0,0"

@@ -6,6 +6,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -57,6 +58,14 @@ internal static class Program
         string dir=Path.Combine(artifacts ?? Path.GetTempPath(),"khz-subsystems-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);
         if(artifacts is not null) Console.WriteLine("ARTIFACTS="+dir);
         try {
+            const string loadError="Could not load khz_sheet.dll or the required VC++ runtime: missing native runtime";
+            using(var unavailable=new WorksheetSession("Unavailable",false,loadError)) {
+                Check(!unavailable.EngineAvailable,"injected native engine failure");
+                Check(!unavailable.CommitCell(0,0,"=1+1",out string formulaError) && formulaError==loadError,"unavailable engine refuses formulas with load error");
+                Check(!unavailable.CommitCell(0,0,"12.5",out _),"unavailable engine refuses numeric input");
+                Check(unavailable.GetInput(0,0)=="","rejected unavailable-engine edits preserve input");
+                Check(unavailable.CommitCell(0,0,"plain text",out _) && unavailable.GetInput(0,0)=="plain text","unavailable engine permits text only");
+            }
             using var s=new WorksheetSession("Mixed العربية");Check(s.EngineAvailable,"native available");
             Edit(s,0,0,"Label");Edit(s,0,1,"Value");Edit(s,1,0,"مرحبا");Edit(s,1,1,"2");
             Edit(s,2,0,"B");Edit(s,2,1,"10");Edit(s,3,0,"C");Edit(s,3,1,"=1/2");
@@ -152,6 +161,22 @@ internal static class Program
             App app=new();app.InitializeComponent();app.ShutdownMode=ShutdownMode.OnExplicitShutdown;
             MainWindow window=new();window.Show();window.UpdateLayout();
             ListBox tabs=(ListBox)window.FindName("SheetList");
+            var unavailableUi=new WorksheetSession("Unavailable UI",false,loadError);
+            ((ObservableCollection<WorksheetSession>)tabs.ItemsSource).Add(unavailableUi);
+            tabs.SelectedItem=unavailableUi;Pump();
+            Border errorBanner=(Border)window.FindName("ErrorBanner");
+            Check(errorBanner.Visibility==Visibility.Visible && ((TextBlock)window.FindName("ErrorBannerText")).Text==loadError,"native load failure is shown verbatim");
+            Check(!((Button)window.FindName("RecalculateButton")).IsEnabled &&
+                !((Button)window.FindName("VerifyButton")).IsEnabled &&
+                !((Button)window.FindName("CopyProofButton")).IsEnabled &&
+                !((Button)window.FindName("ExportXlsxButton")).IsEnabled,"calculation commands disabled without native engine");
+            var clickSheet=new WorksheetSession("Click");
+            ((ObservableCollection<WorksheetSession>)tabs.ItemsSource).Add(clickSheet);
+            tabs.SelectedItem=clickSheet;Pump();
+            DataGrid clickGrid=(DataGrid)window.FindName("SheetGrid");
+            clickGrid.Columns[0].Width=134.5;window.UpdateLayout();
+            clickGrid.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,0,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonUpEvent});
+            Check(clickSheet.ColumnWidths.Count==0,"plain grid click does not persist column widths");
             ((ObservableCollection<WorksheetSession>)tabs.ItemsSource).Add(s);tabs.SelectedItem=s;
             ComboBox themeBox=(ComboBox)window.FindName("ThemeBox");themeBox.SelectedIndex=2;
             DataGrid grid=(DataGrid)window.FindName("SheetGrid");
@@ -174,8 +199,17 @@ internal static class Program
             }
             EditGrid("=5/4");Check(s.GetInput(3,1)=="=5/4" && s.GetInput(1,1)=="2","sorted grid edit hits native row");
             EditGrid("=SUM(");Check(s.GetInput(3,1)=="=5/4" && s.Grid.Rows[3][1].ToString()=="5/4","rejected UI edit restores displayed value");
+            Check(((Border)window.FindName("ErrorBanner")).Visibility==Visibility.Visible,"rejected UI edit shows a visible error");
+            s.ApplyFormat([(200,4)],new CellFormat(Background:"#ABCDEF",Foreground:"#123456",Bold:true),out _);
+            DataRowView farRow=grid.Items.Cast<DataRowView>().Single(item=>s.Grid.Rows.IndexOf(item.Row)==200);
+            grid.ScrollIntoView(farRow,grid.Columns[4]);Pump();window.UpdateLayout();
+            DataGridCell farCell=Visuals<DataGridCell>(grid).Single(cell=>cell.Column==grid.Columns[4] && cell.DataContext==farRow);
+            Check(((SolidColorBrush)farCell.Background).Color==(Color)ColorConverter.ConvertFromString("#ABCDEF") &&
+                farCell.FontWeight==FontWeights.Bold,"virtualized distant cell applies its format on realization");
             grid.Columns[0].Width=134.5;window.UpdateLayout();
-            grid.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,0,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonUpEvent});
+            DataGridColumnHeader resizeHeader=Visuals<DataGridColumnHeader>(grid).Single(header=>header.Column==grid.Columns[0]);
+            Thumb resizeGrip=Visuals<Thumb>(resizeHeader).First();
+            resizeGrip.RaiseEvent(new DragCompletedEventArgs(10,0,false){RoutedEvent=Thumb.DragCompletedEvent});
             Check(Math.Abs(s.ColumnWidths[0]-18.5)<.01,"column resize captured in XLSX width units");
             ((TextBox)window.FindName("RowHeightBox")).Text="30";Click("Row Height");
             Check(s.RowHeights[3]==30,"row height control targets native row");

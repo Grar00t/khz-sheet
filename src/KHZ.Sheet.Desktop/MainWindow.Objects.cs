@@ -135,27 +135,36 @@ public partial class MainWindow
             if(visual.Item is DataRowView item && sheet.RowHeights.TryGetValue(sheet.Grid.Rows.IndexOf(item.Row),out double h)) visual.Height=h*96/72;
         SetStatus("Row height stored in points");
     }
-    private void SheetGrid_MouseUp(object sender,MouseButtonEventArgs e)
+    private void SheetGrid_ColumnResizeCompleted(object sender,DragCompletedEventArgs e)
     {
-        if(CurrentSheet is not WorksheetSession sheet) return;
-        foreach(var column in SheetGrid.Columns) if(column.ActualWidth>=12) sheet.SetColumnWidth(column.DisplayIndex,(column.ActualWidth-5)/7);
-        foreach(var visual in FindVisualChildren<DataGridRow>(SheetGrid))
-            if(!double.IsNaN(visual.Height) && visual.Item is DataRowView item) sheet.SetRowHeight(sheet.Grid.Rows.IndexOf(item.Row),visual.Height*72/96);
-        UpdateHeaderSelection();
+        if(CurrentSheet is not WorksheetSession sheet ||
+            FindVisualAncestor<DataGridColumnHeader>(e.OriginalSource as DependencyObject)?.Column is not { } column ||
+            column.ActualWidth < 12) return;
+        sheet.SetColumnWidth(column.DisplayIndex,(column.ActualWidth-5)/7);
     }
+
     private void UpdateHeaderSelection()
     {
         var cells=SelectedCoordinates();var rows=cells.Select(c=>c.Row).ToHashSet();var cols=cells.Select(c=>c.Column).ToHashSet();
         foreach(var header in FindVisualChildren<DataGridColumnHeader>(SheetGrid)) {
-            bool selected=header.Column is not null && cols.Contains(header.Column.DisplayIndex);
-            header.FontWeight=selected?FontWeights.Bold:FontWeights.Normal;
-            header.BorderThickness=selected?new Thickness(0,0,1,3):new Thickness(0,0,1,1);
-            AutomationProperties.SetHelpText(header,selected?"Selected column":"Column");
+            header.Tag=header.Column is not null && cols.Contains(header.Column.DisplayIndex);
+            AutomationProperties.SetHelpText(header,(bool)header.Tag?"Selected column":"Column");
         }
-        foreach(var visual in FindVisualChildren<DataGridRow>(SheetGrid)) {
-            int row=visual.Item is DataRowView item && CurrentSheet is WorksheetSession sheet?sheet.Grid.Rows.IndexOf(item.Row):-1;
-            visual.HeaderStyle=new Style(typeof(DataGridRowHeader),FindResource(typeof(DataGridRowHeader)) as Style) {
-                Setters={new Setter(Control.FontWeightProperty,rows.Contains(row)?FontWeights.Bold:FontWeights.Normal)} };
+        foreach(var header in FindVisualChildren<DataGridRowHeader>(SheetGrid)) {
+            var visual=FindVisualAncestor<DataGridRow>(header);
+            int row=visual?.Item is DataRowView item && CurrentSheet is WorksheetSession sheet?sheet.Grid.Rows.IndexOf(item.Row):-1;
+            header.Tag=rows.Contains(row);
         }
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject? current) where T:DependencyObject
+    {
+        while(current is not null) {
+            if(current is T match) return match;
+            DependencyObject? parent=VisualTreeHelper.GetParent(current);
+            if(parent is null && current is FrameworkElement element) parent=element.TemplatedParent;
+            current=parent;
+        }
+        return null;
     }
 }
