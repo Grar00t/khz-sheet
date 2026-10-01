@@ -1,0 +1,12 @@
+From 9bb81f19cb23470b06a5064c429cae648a15a08a Mon Sep 17 00:00:00 2001
+From: Perplexity Assistant <noreply@perplexity.ai>
+Date: Thu, 1 Oct 2026 13:26:03 +0000
+Subject: [PATCH] Implement atomic multi-cell spreadsheet edits
+
+---
+ src/KHZ.Sheet.Desktop/MainWindow.xaml.cs      | 36 +++----------
+ .../WorkbookObjectsSession.cs                 | 50 +++++++++++++++++++
+ src/KHZ.Sheet.Desktop/WorkbookSession.cs      |  3 ++
+ tests/dotnet/KhzSubsystemContracts/Program.cs | 15 ++++++
+ 4 files changed, 76 insertions(+), 28 deletions(-)
+
