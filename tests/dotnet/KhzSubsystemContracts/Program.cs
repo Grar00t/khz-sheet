@@ -104,6 +104,13 @@ internal static class Program
                 Check(deletedReference.DeleteRow(0,out _) && deletedReference.Grid.Rows[0][0].ToString()=="#REF!",
                     "deleting a referenced row reports a formula error");
             }
+            using(var deletedRangeEndpoint=new WorksheetSession("Deleted range endpoint")) {
+                Edit(deletedRangeEndpoint,0,0,"1");Edit(deletedRangeEndpoint,1,0,"2");Edit(deletedRangeEndpoint,2,0,"3");
+                Edit(deletedRangeEndpoint,4,1,"=SUM(A1:A3)");
+                Check(deletedRangeEndpoint.DeleteRow(0,out _) &&
+                    deletedRangeEndpoint.GetInput(3,1)=="=SUM(A1:A2)" &&
+                    deletedRangeEndpoint.Grid.Rows[3][1].ToString()=="5","deleting a range endpoint contracts dependent ranges");
+            }
             using var s=new WorksheetSession("Mixed العربية");Check(s.EngineAvailable,"native available");
             Edit(s,0,0,"Label");Edit(s,0,1,"Value");Edit(s,1,0,"مرحبا");Edit(s,1,1,"2");
             Edit(s,2,0,"B");Edit(s,2,1,"10");Edit(s,3,0,"C");Edit(s,3,1,"=1/2");

@@ -171,8 +171,9 @@ public sealed partial class WorksheetSession
         adjusted=formula;
         if(FormulaLexer.TryTokenize(formula,out IReadOnlyList<FormulaToken> tokens)!=SheetStatus.Ok) return false;
         List<(int Start,int Length,string Value)> replacements=new();
-        foreach(FormulaToken token in tokens)
+        for(int tokenIndex=0;tokenIndex<tokens.Count;++tokenIndex)
         {
+            FormulaToken token=tokens[tokenIndex];
             if(token.Kind!=FormulaTokenKind.Reference) continue;
             string source=formula.Substring(token.Start,token.Length);
             int qualifier=source.LastIndexOf('!');
@@ -181,9 +182,25 @@ public sealed partial class WorksheetSession
             int coordinate=axis==StructureAxis.Row?address.Row:address.Column;
             bool deleted=!insert && coordinate==index;
             if(!deleted && !((insert && coordinate>=index)||(!insert && coordinate>index))) continue;
-            if(deleted) { replacements.Add((token.Start,token.Length,"#REF!")); continue; }
             int newRow=address.Row,newColumn=address.Column;
-            if(axis==StructureAxis.Row) newRow+=insert?1:-1; else newColumn+=insert?1:-1;
+            if(deleted)
+            {
+                FormulaToken? adjacent=tokenIndex>=2 && tokens[tokenIndex-1].Kind==FormulaTokenKind.Colon &&
+                    tokens[tokenIndex-2].Kind==FormulaTokenKind.Reference ? tokens[tokenIndex-2] :
+                    tokenIndex+2<tokens.Count && tokens[tokenIndex+1].Kind==FormulaTokenKind.Colon &&
+                    tokens[tokenIndex+2].Kind==FormulaTokenKind.Reference ? tokens[tokenIndex+2] : null;
+                if(adjacent is null)
+                { replacements.Add((token.Start,token.Length,"#REF!")); continue; }
+                string adjacentSource=formula.Substring(adjacent.Start,adjacent.Length);
+                int adjacentQualifier=adjacentSource.LastIndexOf('!');
+                if(adjacentQualifier>=0 || CellAddress.TryParse(adjacentSource,out CellAddress other)!=SheetStatus.Ok)
+                    return false;
+                int otherCoordinate=axis==StructureAxis.Row?other.Row:other.Column;
+                if(otherCoordinate==index) return false;
+                coordinate=otherCoordinate<index?index-1:index;
+            }
+            else coordinate+=insert?1:-1;
+            if(axis==StructureAxis.Row) newRow=coordinate; else newColumn=coordinate;
             string original=source;
             int lettersStart=original.StartsWith('$')?1:0;
             int lettersEnd=lettersStart;
