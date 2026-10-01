@@ -618,33 +618,17 @@ public partial class MainWindow : Window
             .Replace('\r', '\n')
             .Split('\n');
 
-        int written = 0;
-        string lastMessage = string.Empty;
-
+        List<(int Row, int Column, string? Input)> edits = new();
         for (int rowOffset = 0; rowOffset < lines.Length; rowOffset++)
         {
-            if (rowOffset == lines.Length - 1 && lines[rowOffset].Length == 0)
-            {
-                continue;
-            }
-
+            if (rowOffset == lines.Length - 1 && lines[rowOffset].Length == 0) continue;
             string[] cells = lines[rowOffset].Split('\t');
             for (int columnOffset = 0; columnOffset < cells.Length; columnOffset++)
-            {
-                int row = startRow + rowOffset;
-                int column = startColumn + columnOffset;
-
-                if (row >= sheet.Grid.Rows.Count || column >= sheet.Grid.Columns.Count)
-                {
-                    continue;
-                }
-
-                sheet.CommitCell(row, column, cells[columnOffset], out lastMessage);
-                written++;
-            }
+                edits.Add((startRow + rowOffset, startColumn + columnOffset, cells[columnOffset]));
         }
 
-        SetStatus($"pasted {written:N0} cells · {lastMessage}");
+        bool pasted = sheet.CommitCellsAtomic(edits, out string message);
+        SetStatus(pasted ? $"pasted {edits.Count:N0} cells · one undo action" : $"paste refused · {message}");
         RefreshEngineText();
         SheetGrid.Items.Refresh();
         UpdateFormulaBar();
@@ -676,13 +660,9 @@ public partial class MainWindow : Window
             }
         }
 
-        string lastMessage = string.Empty;
-        foreach ((int row, int column) in cells.Distinct())
-        {
-            sheet.CommitCell(row, column, string.Empty, out lastMessage);
-        }
-
-        SetStatus($"cleared {cells.Distinct().Count():N0} cells · {lastMessage}");
+        var edits = cells.Distinct().Select(cell => (cell.Row, cell.Column, (string?)string.Empty)).ToArray();
+        bool cleared = sheet.CommitCellsAtomic(edits, out string message);
+        SetStatus(cleared ? $"cleared {edits.Length:N0} cells · one undo action" : $"clear refused · {message}");
         RefreshEngineText();
         SheetGrid.Items.Refresh();
         UpdateFormulaBar();

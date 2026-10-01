@@ -131,6 +131,56 @@ public sealed partial class WorksheetSession
         return true;
     }
 
+    private bool ApplyCellBatchHistory(CellBatchEdit edit, bool undo, out string message)
+    {
+        if (!StageValues(edit.Cells, undo, out WorksheetSession? candidate, out message)) return false;
+        using (candidate) AdoptValues(candidate!);
+        foreach (int row in edit.Cells.Select(cell => cell.Row).Distinct()) UpdateTableHeaders(row);
+        message = $"{(undo ? "undo" : "redo")} · {edit.Cells.Count:N0} cells";
+        return true;
+    }
+
+    public bool CommitCellsAtomic(IEnumerable<(int Row, int Column, string? Input)> cells, out string message)
+    {
+        ArgumentNullException.ThrowIfNull(cells);
+        var requested = new Dictionary<long, (int Row, int Column, string Input)>();
+        foreach ((int row, int column, string? input) in cells)
+        {
+            if (!InBounds(row, column))
+            {
+                message = SheetStatusText.Name(SheetStatus.ErrRange);
+                return false;
+            }
+            requested[Key(row, column)] = (row, column, input ?? string.Empty);
+        }
+        if (requested.Count == 0)
+        {
+            message = "no cells to edit";
+            return false;
+        }
+
+        List<CellEdit> changes = new(requested.Count);
+        foreach ((int row, int column, string input) in requested.Values)
+        {
+            string before = GetInput(row, column);
+            if (string.Equals(before, input, StringComparison.Ordinal)) continue;
+            if (!ValidateTableEdit(row, column, input, out message)) return false;
+            changes.Add(new CellEdit(row, column, before, input));
+        }
+        if (changes.Count == 0)
+        {
+            message = "cells unchanged";
+            return false;
+        }
+        if (!StageValues(changes, false, out WorksheetSession? candidate, out message)) return false;
+        using (candidate) AdoptValues(candidate!);
+        foreach (int row in changes.Select(cell => cell.Row).Distinct()) UpdateTableHeaders(row);
+        _undo.Push(new CellBatchEdit(changes.AsReadOnly()));
+        _redo.Clear();
+        message = $"edited {changes.Count:N0} cells";
+        return true;
+    }
+
     public bool CreateTableWithTotals(CellRange selection, string name, out string message)
     {
         message = "Select headers and data with an empty row below for totals";
