@@ -733,25 +733,95 @@ public sealed partial class WorksheetSession : IDisposable
         int rowCount = Math.Min(records.Count, Grid.Rows.Count);
         int imported = 0;
 
-        for (int row = 0; row < rowCount; row++)
+        if(!EngineAvailable)
         {
-            int columnCount = Math.Min(records[row].Count, Grid.Columns.Count);
-            for (int column = 0; column < columnCount; column++)
-            {
-                string value = records[row][column];
-                if (value.Length == 0)
+            for(int row=0;row<rowCount;++row)
+            for(int column=0;column<Math.Min(records[row].Count,Grid.Columns.Count);++column)
+                if(records[row][column].Length!=0 && RequiresCalculation(records[row][column]))
                 {
-                    continue;
+                    message=$"{EngineLoadError??EngineSummary} · CSV cell {ColumnName(column)}{row+1} requires the native engine";
+                    return false;
                 }
-
-                CommitCell(row, column, value, out _);
-                imported++;
-            }
         }
 
+        WorksheetSession? candidate;
+        if(EngineAvailable)
+            candidate=CreateCopy(Name,out message);
+        else
+        {
+            candidate=new WorksheetSession(Name,false,EngineLoadError);
+            foreach(var pair in _inputs)
+            {
+                DecodeKey(pair.Key,out int oldRow,out int oldColumn);
+                if(RequiresCalculation(pair.Value))
+                {
+                    message=EngineLoadError??EngineSummary;
+                    candidate.Dispose();
+                    return false;
+                }
+                if(!candidate.CommitCell(oldRow,oldColumn,pair.Value,out message))
+                { candidate.Dispose(); return false; }
+            }
+            foreach(var item in _formats) candidate._formats.Add(item.Key,item.Value);
+            candidate._tableFormats.AddRange(_tableFormats);
+            candidate._tables.AddRange(_tables);
+            candidate._charts.AddRange(_charts);
+            foreach(var item in _columnWidths) candidate._columnWidths.Add(item.Key,item.Value);
+            foreach(var item in _rowHeights) candidate._rowHeights.Add(item.Key,item.Value);
+            candidate.Theme=Theme;
+            candidate.FrozenColumns=FrozenColumns;
+        }
+
+        if(candidate is null) return false;
+        using(candidate)
+        {
+            for (int row = 0; row < rowCount; row++)
+            {
+                int columnCount = Math.Min(records[row].Count, Grid.Columns.Count);
+                for (int column = 0; column < columnCount; column++)
+                {
+                    string value = records[row][column];
+                    if (value.Length == 0) continue;
+                    if(!candidate.CommitCell(row,column,value,out string cellError))
+                    {
+                        message=$"CSV import rejected at {ColumnName(column)}{row+1} · {cellError}";
+                        return false;
+                    }
+                    imported++;
+                }
+            }
+            if(candidate.EngineAvailable && !candidate.Recalculate(out message)) return false;
+            AdoptCsvCandidate(candidate);
+        }
         message = $"csv · {imported:N0} populated cells";
         MarkSaved();
         return true;
+    }
+
+    private void AdoptCsvCandidate(WorksheetSession candidate)
+    {
+        _native?.Dispose();
+        _native=candidate._native;
+        candidate._native=null;
+        _inputs.Clear();
+        foreach(var item in candidate._inputs) _inputs.Add(item.Key,item.Value);
+        _formats.Clear();
+        foreach(var item in candidate._formats) _formats.Add(item.Key,item.Value);
+        _tableFormats.Clear(); _tableFormats.AddRange(candidate._tableFormats);
+        _tables.Clear(); _tables.AddRange(candidate._tables);
+        _charts.Clear(); _charts.AddRange(candidate._charts);
+        _columnWidths.Clear();
+        foreach(var item in candidate._columnWidths) _columnWidths.Add(item.Key,item.Value);
+        _rowHeights.Clear();
+        foreach(var item in candidate._rowHeights) _rowHeights.Add(item.Key,item.Value);
+        Theme=candidate.Theme;
+        FrozenColumns=candidate.FrozenColumns;
+        EngineStatus=candidate.EngineStatus;
+        _undo.Clear(); _redo.Clear();
+        for(int row=0;row<Grid.Rows.Count;++row)
+            for(int column=0;column<Grid.Columns.Count;++column)
+                Grid.Rows[row][column]=candidate.Grid.Rows[row][column];
+        RefreshComputedCells();
     }
 
     internal string RenderInput(int row, int column) => RenderCell(row, column, GetInput(row, column));

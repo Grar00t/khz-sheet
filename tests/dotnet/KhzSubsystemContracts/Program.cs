@@ -4,6 +4,7 @@ using System.Windows.Automation.Peers;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -106,10 +107,27 @@ internal static class Program
             }
             using(var deletedRangeEndpoint=new WorksheetSession("Deleted range endpoint")) {
                 Edit(deletedRangeEndpoint,0,0,"1");Edit(deletedRangeEndpoint,1,0,"2");Edit(deletedRangeEndpoint,2,0,"3");
-                Edit(deletedRangeEndpoint,4,1,"=SUM(A1:A3)");
+                Edit(deletedRangeEndpoint,4,1,"=SUM(A1 : A3)");
                 Check(deletedRangeEndpoint.DeleteRow(0,out _) &&
-                    deletedRangeEndpoint.GetInput(3,1)=="=SUM(A1:A2)" &&
+                    deletedRangeEndpoint.GetInput(3,1)=="=SUM(A1 : A2)" &&
                     deletedRangeEndpoint.Grid.Rows[3][1].ToString()=="5","deleting a range endpoint contracts dependent ranges");
+            }
+            using(var deletedRange=new WorksheetSession("Deleted range")) {
+                Edit(deletedRange,1,0,"1");Edit(deletedRange,1,1,"2");Edit(deletedRange,4,2,"=SUM(A2 : B2)");
+                Check(deletedRange.DeleteRow(1,out _) && deletedRange.GetInput(3,2)=="=SUM(#REF!)" &&
+                    deletedRange.Grid.Rows[3][2].ToString()=="#REF!","deleting an entire referenced range reports #REF without blocking the edit");
+            }
+            using(var unavailableCsv=new WorksheetSession("Unavailable CSV",false,loadError)) {
+                string csv=Path.Combine(dir,"unavailable.csv");
+                File.WriteAllText(csv,"plain,12\r\n");
+                Check(!unavailableCsv.LoadCsv(csv,out string csvError) && csvError.StartsWith(loadError,StringComparison.Ordinal) &&
+                    unavailableCsv.GetInput(0,0)==string.Empty,"CSV import refuses calculation-dependent cells atomically without engine");
+            }
+            using(var invalidCsv=new WorksheetSession("Invalid CSV")) {
+                string csv=Path.Combine(dir,"invalid.csv");
+                File.WriteAllText(csv,"plain,=SUM(\r\n");
+                Check(!invalidCsv.LoadCsv(csv,out _) && invalidCsv.GetInput(0,0)==string.Empty,
+                    "rejected CSV import leaves the worksheet unchanged");
             }
             using var s=new WorksheetSession("Mixed العربية");Check(s.EngineAvailable,"native available");
             Edit(s,0,0,"Label");Edit(s,0,1,"Value");Edit(s,1,0,"مرحبا");Edit(s,1,1,"2");
@@ -323,6 +341,27 @@ internal static class Program
             Check(restoredTabs.Items.Count==4 && restoredSheet.GetInput(3,1)=="=5/4" &&
                 restoredSheet.GetEffectiveFormat(200,4).Background=="#ABCDEF","recovery restores sheet inputs and presentation");
             restoredWindow.Close();
+            string csvRecoveryDirectory=Path.Combine(dir,"recovery-csv");
+            string csvGeneration=Guid.NewGuid().ToString("N");
+            string csvGenerationPath=Path.Combine(csvRecoveryDirectory,csvGeneration);
+            Directory.CreateDirectory(csvGenerationPath);
+            File.WriteAllText(Path.Combine(csvGenerationPath,"sheet-001.csv"),"recovered text");
+            File.WriteAllText(Path.Combine(csvRecoveryDirectory,"recovery.json"),JsonSerializer.Serialize(new
+            {
+                Version=1,Generation=csvGeneration,Sheets=new[]{new{Name="Text recovery",FileName="sheet-001.csv"}}
+            }));
+            Environment.SetEnvironmentVariable("KHZ_RECOVERY_DIRECTORY",csvRecoveryDirectory);
+            MainWindow textRestoreWindow=new();textRestoreWindow.Show();Pump();
+            ListBox textRestoreTabs=(ListBox)textRestoreWindow.FindName("SheetList");
+            var unavailableRestore=new WorksheetSession("Unavailable restore",false,loadError);
+            ((ObservableCollection<WorksheetSession>)textRestoreTabs.ItemsSource).Add(unavailableRestore);
+            textRestoreTabs.SelectedItem=unavailableRestore;
+            typeof(MainWindow).GetMethod("RestoreRecoverySnapshot",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(textRestoreWindow,null);
+            WorksheetSession textRecovered=((ObservableCollection<WorksheetSession>)textRestoreTabs.ItemsSource).Single();
+            Check(!textRecovered.EngineAvailable && textRecovered.GetInput(0,0)=="recovered text",
+                "CSV recovery can restore text without the native engine");
+            textRestoreWindow.Close();
             Environment.SetEnvironmentVariable("KHZ_TEST_ARTIFACTS",previousTestArtifacts);
             Environment.SetEnvironmentVariable("KHZ_RECOVERY_DIRECTORY",previousRecoveryDirectory);
             app.Shutdown();

@@ -19,7 +19,7 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 - Unsaved-change prompts and debounced/periodic recovery snapshots using a temporary generation and published manifest. Per-sheet XLSX recovery retains supported presentation when the native engine is available; engine-unavailable recovery is text-only CSV.
 - Per-cell styling on realization, drag-completed column-width persistence, explicit row-height editing, and selection header styling with throttled updates.
 - Type-to-edit (WPF), F2, Enter/Tab/Shift+Tab and arrow navigation, Home/End/Ctrl+Arrow, Ctrl+D/Ctrl+R, Name Box jump, and selection Sum/Average/Count display.
-- Bounded row/column insertion/deletion rebuilds the native session and adjusts unqualified references. Deleting a directly referenced cell yields `#REF!`; structural changes clear undo history.
+- Bounded row/column insertion/deletion rebuilds the native session and adjusts unqualified references. Deleting a directly referenced cell or an entire referenced range yields `#REF!`; surviving ranges contract when an endpoint is removed. Structural changes clear undo history.
 - Rejected edits display a banner; spreadsheet error cells are styled distinctly.
 
 ## High-value gaps and boundaries
@@ -36,7 +36,7 @@ This file is a parity map, not a compatibility claim. Targets were compared agai
 - Structured references, table filters/resize/calculated columns, richer or multi-series charts, pivots, comments/notes and hyperlinks.
 - Broader formula families: logical, lookup/reference, text, date/time, statistical and array functions.
 - Print/page layout, import/export fidelity and general Excel workbook compatibility.
-- Recovery snapshots are not a named workbook save or version history. Collaboration, protected ranges and sharing are not local-engine features today.
+- Recovery snapshots are not a named workbook save or version history. Text-only CSV recovery can be restored without the engine; numerical/formula recovery requires the native engine. Collaboration, protected ranges and sharing are not local-engine features today.
 - Complete keyboard/accessibility, high-contrast and Arabic/RTL workflow verification.
 - WPF interaction assertions are present in `KhzSubsystemContracts`, but must be run by `pwsh scripts/verify-windows.ps1` on Windows; a cross-target build on another OS proves compilation only.
 

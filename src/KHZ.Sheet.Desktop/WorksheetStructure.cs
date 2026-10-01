@@ -171,8 +171,10 @@ public sealed partial class WorksheetSession
         adjusted=formula;
         if(FormulaLexer.TryTokenize(formula,out IReadOnlyList<FormulaToken> tokens)!=SheetStatus.Ok) return false;
         List<(int Start,int Length,string Value)> replacements=new();
+        HashSet<int> replacedTokens=new();
         for(int tokenIndex=0;tokenIndex<tokens.Count;++tokenIndex)
         {
+            if(replacedTokens.Contains(tokenIndex)) continue;
             FormulaToken token=tokens[tokenIndex];
             if(token.Kind!=FormulaTokenKind.Reference) continue;
             string source=formula.Substring(token.Start,token.Length);
@@ -189,6 +191,20 @@ public sealed partial class WorksheetSession
                     tokens[tokenIndex-2].Kind==FormulaTokenKind.Reference ? tokens[tokenIndex-2] :
                     tokenIndex+2<tokens.Count && tokens[tokenIndex+1].Kind==FormulaTokenKind.Colon &&
                     tokens[tokenIndex+2].Kind==FormulaTokenKind.Reference ? tokens[tokenIndex+2] : null;
+                int previous=PreviousNonSpaceToken(tokens,tokenIndex-1);
+                int next=NextNonSpaceToken(tokens,tokenIndex+1);
+                if(adjacent is null && previous>=0 && tokens[previous].Kind==FormulaTokenKind.Colon)
+                {
+                    int beforeColon=PreviousNonSpaceToken(tokens,previous-1);
+                    if(beforeColon>=0 && tokens[beforeColon].Kind==FormulaTokenKind.Reference)
+                        adjacent=tokens[beforeColon];
+                }
+                if(adjacent is null && next>=0 && tokens[next].Kind==FormulaTokenKind.Colon)
+                {
+                    int afterColon=NextNonSpaceToken(tokens,next+1);
+                    if(afterColon>=0 && tokens[afterColon].Kind==FormulaTokenKind.Reference)
+                        adjacent=tokens[afterColon];
+                }
                 if(adjacent is null)
                 { replacements.Add((token.Start,token.Length,"#REF!")); continue; }
                 string adjacentSource=formula.Substring(adjacent.Start,adjacent.Length);
@@ -196,7 +212,19 @@ public sealed partial class WorksheetSession
                 if(adjacentQualifier>=0 || CellAddress.TryParse(adjacentSource,out CellAddress other)!=SheetStatus.Ok)
                     return false;
                 int otherCoordinate=axis==StructureAxis.Row?other.Row:other.Column;
-                if(otherCoordinate==index) return false;
+                if(otherCoordinate==index)
+                {
+                    int otherTokenIndex=-1;
+                    for(int i=0;i<tokens.Count;++i)
+                        if(ReferenceEquals(tokens[i],adjacent)) { otherTokenIndex=i; break; }
+                    if(otherTokenIndex<0) return false;
+                    FormulaToken first=tokens[Math.Min(tokenIndex,otherTokenIndex)];
+                    FormulaToken last=tokens[Math.Max(tokenIndex,otherTokenIndex)];
+                    replacements.Add((first.Start,last.Start+last.Length-first.Start,"#REF!"));
+                    replacedTokens.Add(tokenIndex);
+                    replacedTokens.Add(otherTokenIndex);
+                    continue;
+                }
                 coordinate=otherCoordinate<index?index-1:index;
             }
             else coordinate+=insert?1:-1;
@@ -223,6 +251,18 @@ public sealed partial class WorksheetSession
         builder.Append(formula,cursor,formula.Length-cursor);
         adjusted=builder.ToString();
         return true;
+    }
+
+    private static int PreviousNonSpaceToken(IReadOnlyList<FormulaToken> tokens,int index)
+    {
+        while(index>=0 && tokens[index].Kind==FormulaTokenKind.Space) --index;
+        return index;
+    }
+
+    private static int NextNonSpaceToken(IReadOnlyList<FormulaToken> tokens,int index)
+    {
+        while(index<tokens.Count && tokens[index].Kind==FormulaTokenKind.Space) ++index;
+        return index<tokens.Count?index:-1;
     }
 
     private static void ShiftDimensions(Dictionary<int,double> dimensions,int index,bool insert,int limit)

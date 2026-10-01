@@ -175,6 +175,7 @@ public partial class MainWindow : Window
             }
             else
             {
+                ShowEditError(message);
                 SetStatus(message);
             }
         }
@@ -1164,17 +1165,22 @@ public partial class MainWindow : Window
         List<WorksheetSession> recovered=new();
         try
         {
-            if(CurrentSheet?.EngineAvailable!=true) throw new InvalidOperationException(CurrentSheet?.EngineLoadError ?? "native engine unavailable");
             RecoveryManifest? manifest=JsonSerializer.Deserialize<RecoveryManifest>(File.ReadAllText(Path.Combine(RecoveryRoot,"recovery.json")));
             if(manifest is null || manifest.Version!=1 || !Guid.TryParseExact(manifest.Generation,"N",out _) ||
                 manifest.Sheets is null || manifest.Sheets.Length==0) throw new InvalidDataException("recovery manifest is invalid");
+            if(manifest.Sheets.Any(entry=>entry is null || entry.Name is null || entry.FileName is null ||
+                entry.FileName!=Path.GetFileName(entry.FileName) ||
+                Path.GetExtension(entry.FileName) is not (".xlsx" or ".csv")))
+                throw new InvalidDataException("recovery file name is invalid");
+            if(manifest.Sheets.Any(entry=>Path.GetExtension(entry.FileName)==".xlsx") &&
+                CurrentSheet?.EngineAvailable!=true)
+                throw new InvalidOperationException(CurrentSheet?.EngineLoadError ?? "native engine unavailable");
             string generation=Path.Combine(RecoveryRoot,manifest.Generation);
             foreach(RecoveryEntry entry in manifest.Sheets)
             {
-                if(entry.Name is null || entry.FileName is null || entry.FileName!=Path.GetFileName(entry.FileName) ||
-                    Path.GetExtension(entry.FileName) is not (".xlsx" or ".csv"))
-                    throw new InvalidDataException("recovery file name is invalid");
-                WorksheetSession sheet=new(entry.Name);
+                WorksheetSession sheet=CurrentSheet?.EngineAvailable==true
+                    ? new WorksheetSession(entry.Name)
+                    : new WorksheetSession(entry.Name,false,CurrentSheet?.EngineLoadError);
                 string recoveryPath=Path.Combine(generation,entry.FileName);
                 bool loaded=Path.GetExtension(entry.FileName)==".xlsx"
                     ? sheet.LoadXlsx(recoveryPath,out string message)

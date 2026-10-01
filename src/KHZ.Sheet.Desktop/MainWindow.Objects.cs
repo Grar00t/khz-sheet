@@ -30,6 +30,7 @@ public partial class MainWindow
             });
             candidate=result.sheet;
             if(result.ok) { candidate.MarkDirty(); _workbook.Sheets.Add(candidate); SheetList.SelectedItem=candidate; candidate=null; }
+            else ShowEditError(result.message);
             SetStatus(result.message);
         } finally { candidate?.Dispose(); IsEnabled=true; }
     }
