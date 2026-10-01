@@ -30,9 +30,10 @@ public sealed class WorkbookSession : IDisposable
 
     internal string GetUniqueSheetName(string requestedName)
     {
-        if (!IsValidSheetName(requestedName))
+        string normalized = NormalizeSheetName(requestedName);
+        if (!IsValidSheetName(normalized))
             throw new ArgumentException("Worksheet names must be 1-31 characters and cannot contain : \\ / ? * [ ] or boundary apostrophes.", nameof(requestedName));
-        return MakeUniqueName(requestedName);
+        return MakeUniqueName(normalized);
     }
 
     public bool RenameSheet(WorksheetSession sheet, string name, out string message)
@@ -40,6 +41,7 @@ public sealed class WorkbookSession : IDisposable
         message = "worksheet does not belong to this workbook";
         if (!Sheets.Contains(sheet)) return false;
         message = "worksheet name must be 1-31 characters and cannot contain : \\ / ? * [ ] or boundary apostrophes";
+        name = NormalizeSheetName(name);
         if (!IsValidSheetName(name)) return false;
         if (Sheets.Any(other => !ReferenceEquals(other, sheet) &&
             string.Equals(other.Name, name, StringComparison.OrdinalIgnoreCase)))
@@ -60,7 +62,7 @@ public sealed class WorkbookSession : IDisposable
         if (!Sheets.Contains(source)) return false;
         string name = requestedName is null
             ? MakeUniqueName(source.Name[..Math.Min(source.Name.Length, 26)] + " Copy")
-            : requestedName;
+            : NormalizeSheetName(requestedName);
         if (!IsValidSheetName(name))
         {
             message = "worksheet name must be 1-31 characters and cannot contain : \\ / ? * [ ] or boundary apostrophes";
@@ -110,10 +112,15 @@ public sealed class WorkbookSession : IDisposable
         return true;
     }
 
-    public static bool IsValidSheetName(string? name) =>
-        name is { Length: >= 1 and <= 31 } &&
-        name[0] != '\'' && name[^1] != '\'' &&
-        name.IndexOfAny([':', '\\', '/', '?', '*', '[', ']']) < 0;
+    public static bool IsValidSheetName(string? name)
+    {
+        string normalized = NormalizeSheetName(name);
+        return normalized.Length is >= 1 and <= 31 &&
+            normalized[0] != '\'' && normalized[^1] != '\'' &&
+            normalized.IndexOfAny([':', '\\', '/', '?', '*', '[', ']']) < 0;
+    }
+
+    private static string NormalizeSheetName(string? name) => name?.Trim() ?? "";
 
     private string NextAvailableName()
     {

@@ -244,14 +244,16 @@ internal static partial class XlsxPresentationSerializer
                 if(pane is not null) {
                     Attributes(pane,"xSplit","ySplit","topLeftCell","activePane","state");
                     int columns=Int(pane,"xSplit"), rows=Int(pane,"ySplit");
-                    if((string?)pane.Attribute("state")!="frozen" || columns<0 || rows<0 ||
+                    string? state=(string?)pane.Attribute("state");
+                    if((state is not null && state is not ("frozen" or "frozenSplit")) || columns<0 || rows<0 ||
                        columns>=session.Grid.Columns.Count || rows>=session.Grid.Rows.Count || columns+rows==0)
                         throw new NotSupportedException("Invalid or unsupported frozen pane");
-                    string expected=WorksheetSession.ColumnName(columns)+(rows+1).ToString(CultureInfo.InvariantCulture);
-                    string activePane=columns>0?(rows>0?"bottomRight":"topRight"):"bottomLeft";
-                    if(!string.Equals((string?)pane.Attribute("topLeftCell"),expected,StringComparison.OrdinalIgnoreCase) ||
-                       !string.Equals((string?)pane.Attribute("activePane"),activePane,StringComparison.Ordinal))
-                        throw new InvalidDataException("Frozen pane coordinates do not match its splits");
+                    string? topLeft=(string?)pane.Attribute("topLeftCell");
+                    if(topLeft is not null && CellAddress.TryParse(topLeft,out _)!=SheetStatus.Ok)
+                        throw new InvalidDataException("Invalid frozen pane topLeftCell");
+                    string? activePane=(string?)pane.Attribute("activePane");
+                    if(activePane is not null && activePane is not ("topLeft" or "topRight" or "bottomLeft" or "bottomRight"))
+                        throw new InvalidDataException("Invalid frozen pane activePane");
                     session.SetFrozenColumns(columns);
                     session.SetFrozenRows(rows);
                 }

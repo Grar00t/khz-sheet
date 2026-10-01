@@ -111,6 +111,42 @@ internal static class Program
                     loaded.FrozenColumns==columns && loaded.FrozenRows==rows,
                     "frozen pane round trip "+importMessage);
             }
+            using(var paneLimits=new WorksheetSession("PaneLimits"))
+            {
+                bool columnsAtLimit=false,rowsAtLimit=false,columnsOverLimit=false,rowsOverLimit=false;
+                try { paneLimits.SetFrozenColumns(paneLimits.Grid.Columns.Count); } catch(ArgumentOutOfRangeException) { columnsAtLimit=true; }
+                try { paneLimits.SetFrozenRows(paneLimits.Grid.Rows.Count); } catch(ArgumentOutOfRangeException) { rowsAtLimit=true; }
+                try { paneLimits.SetFrozenColumns(paneLimits.Grid.Columns.Count+1); } catch(ArgumentOutOfRangeException) { columnsOverLimit=true; }
+                try { paneLimits.SetFrozenRows(paneLimits.Grid.Rows.Count+1); } catch(ArgumentOutOfRangeException) { rowsOverLimit=true; }
+                Check(columnsAtLimit&&rowsAtLimit&&columnsOverLimit&&rowsOverLimit,"pane setters reject exact and over-limit splits");
+                string source=Path.Combine(dir,"panes-1-0.xlsx");
+                void RejectPane(string suffix,Func<string,string> edit)
+                {
+                    string path=Path.Combine(dir,"bad-pane-"+suffix+".xlsx");
+                    Rewrite(source,path,"xl/worksheets/sheet1.xml",edit);
+                    using var invalid=new WorksheetSession("InvalidPane");
+                    bool rejected;
+                    try { rejected=!invalid.LoadXlsx(path,out _); } catch { rejected=false; }
+                    Check(rejected,"pane import safely rejects "+suffix);
+                }
+                RejectPane("columns-at-limit",x=>x.Replace("xSplit=\"1\"","xSplit=\"52\""));
+                RejectPane("columns-over-limit",x=>x.Replace("xSplit=\"1\"","xSplit=\"53\""));
+                RejectPane("rows-at-limit",x=>x.Replace("ySplit=\"0\"","ySplit=\"256\""));
+                RejectPane("rows-over-limit",x=>x.Replace("ySplit=\"0\"","ySplit=\"257\""));
+                string metadataPath=Path.Combine(dir,"pane-metadata.xlsx");
+                Rewrite(source,metadataPath,"xl/worksheets/sheet1.xml",
+                    x=>x.Replace("topLeftCell=\"B1\"","topLeftCell=\"A1\"")
+                        .Replace("activePane=\"topRight\"","activePane=\"bottomRight\""));
+                using(var metadata=new WorksheetSession("Metadata"))
+                    Check(metadata.LoadXlsx(metadataPath,out _) && metadata.FrozenColumns==1,
+                        "safe split ignores differing optional pane metadata");
+                string omittedPath=Path.Combine(dir,"pane-metadata-omitted.xlsx");
+                Rewrite(source,omittedPath,"xl/worksheets/sheet1.xml",
+                    x=>x.Replace(" topLeftCell=\"B1\"","").Replace(" activePane=\"topRight\"",""));
+                using(var omitted=new WorksheetSession("OmittedMetadata"))
+                    Check(omitted.LoadXlsx(omittedPath,out _) && omitted.FrozenColumns==1,
+                        "safe split accepts omitted optional pane metadata");
+            }
             string good=Path.Combine(dir,"Corporate_Blue.xlsx");
             Check(!s.CommitCell(0,1,"Label",out _),"duplicate table header refused");
             Edit(s,0,1,"Revenue");Check(s.Tables[0].Columns[1]=="Revenue","header edit updates table metadata");
@@ -182,19 +218,31 @@ internal static class Program
             {
                 WorksheetSession original=workbook.Sheets[0];
                 Check(WorkbookSession.IsValidSheetName("Sheet 1") &&
-                    !WorkbookSession.IsValidSheetName("") && !WorkbookSession.IsValidSheetName(new string('x',32)) &&
+                    WorkbookSession.IsValidSheetName("x") && WorkbookSession.IsValidSheetName(new string('x',31)) &&
+                    !WorkbookSession.IsValidSheetName("") && !WorkbookSession.IsValidSheetName("   ") &&
+                    !WorkbookSession.IsValidSheetName(new string('x',32)) &&
                     !WorkbookSession.IsValidSheetName("bad/name") && !WorkbookSession.IsValidSheetName("'bad") &&
                     !WorkbookSession.IsValidSheetName("bad'") && !WorkbookSession.IsValidSheetName("bad*name") &&
                     !WorkbookSession.IsValidSheetName("bad[name"),"Excel worksheet name rules");
+                Check(workbook.RenameSheet(original,"  Normalized  ",out _) && original.Name=="Normalized",
+                    "rename trims surrounding whitespace");
                 Check(!workbook.RenameSheet(original,"bad/name",out _),"invalid rename refused");
                 bool rejectedInvalidAdd=false;
                 try { workbook.AddSheet("bad:name"); } catch(ArgumentException) { rejectedInvalidAdd=true; }
                 Check(rejectedInvalidAdd,"invalid add name refused");
+                bool rejectedBlankAdd=false;
+                try { workbook.AddSheet("   "); } catch(ArgumentException) { rejectedBlankAdd=true; }
+                Check(rejectedBlankAdd,"whitespace-only add name refused");
+                WorksheetSession trimmedAdd=workbook.AddSheet("  Trimmed  ");
+                Check(trimmedAdd.Name=="Trimmed","add trims surrounding whitespace");
                 WorksheetSession other=workbook.AddSheet("Other");
                 Check(!workbook.RenameSheet(original,"oTHER",out _),"case-insensitive duplicate rename refused");
                 Check(workbook.RenameSheet(other,"Revenue",out _),"rename accepted");
+                Check(workbook.RenameSheet(other,"   ",out _)==false,"whitespace-only rename refused");
                 WorksheetSession duplicateName=workbook.AddSheet("Revenue");
                 Check(duplicateName.Name=="Revenue 2","duplicate add name made unique");
+                Check(workbook.DuplicateSheet(original,"  Named Copy  ",out WorksheetSession? namedCopy,out _) &&
+                    namedCopy?.Name=="Named Copy","duplicate trims surrounding whitespace");
                 Check(workbook.RenameSheet(original,new string('S',31),out _),"31-character worksheet name accepted");
                 Edit(original,0,0,"Category"); Edit(original,0,1,"Amount");
                 Edit(original,1,0,"Synthetic-A"); Edit(original,1,1,"=1/2");
@@ -237,7 +285,7 @@ internal static class Program
                 Check(workbook.MoveSheet(clone,1,out _) && workbook.Sheets.IndexOf(clone)==2 &&
                     workbook.MoveSheet(clone,-1,out _) && workbook.Sheets.IndexOf(clone)==1,
                     "move worksheet left and right");
-                Check(!workbook.MoveSheet(original,-1,out _) && workbook.Sheets.Count==4,
+                Check(!workbook.MoveSheet(original,-1,out _) && workbook.Sheets.Count==6,
                     "worksheet move boundary");
                 Check(workbook.DeleteSheet(clone,out _) && !workbook.Sheets.Contains(clone),"delete worksheet");
                 while(workbook.Sheets.Count>1) Check(workbook.DeleteSheet(workbook.Sheets[1],out _),"delete non-final worksheet");
