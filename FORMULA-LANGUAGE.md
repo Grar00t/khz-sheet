@@ -11,8 +11,11 @@ The native parser accepts optional leading `=`, invariant decimal/scientific lit
 | ROUND(value, decimals) | Integer decimals in -18..18; nearest with ties away from zero; wide integer intermediates and reduced rational result |
 | CEILING(value), FLOOR(value) | Exact integer toward positive/negative infinity; one argument only |
 | IF(condition, true_value, false_value) | Numeric condition, zero is false; only the selected value arm is evaluated |
+| AND(value, …), OR(value, …) | One or more numeric arguments; zero is false, nonzero is true; cell errors propagate |
+| NOT(value) | One numeric argument; returns 1 when zero and 0 otherwise |
+| IFERROR(value, fallback) | Returns the first value unless it is a spreadsheet error; fallback is evaluated only for an error |
 
-These are explicit KHZ policies, not complete Excel function compatibility. IF dependencies conservatively include both arms, so a cycle is rejected even if one arm would not execute. String-valued IF, significance arguments to CEILING/FLOOR, sheet-qualified references, structured references, lookup/text/date/array families remain unsupported. Intermediate aggregate overflow can be rejected even when rearranging the expression would fit.
+These are explicit KHZ policies, not complete Excel function compatibility. IF dependencies conservatively include both arms, so a cycle is rejected even if one arm would not execute. IFERROR also declares dependencies in both arguments while evaluating only the necessary branch. Logical arguments use numeric evaluation: zero is false and any nonzero value is true; a Boolean cell reference evaluates as 1 or 0, while a text reference produces `#VALUE!`. String-valued IF, significance arguments to CEILING/FLOOR, sheet-qualified references, structured references, lookup/text/date/array families remain unsupported. Intermediate aggregate overflow can be rejected even when rearranging the expression would fit.
 
 `^` requires an integer exponent of magnitude at most 1024. Noninteger exponents fail closed. 0^0 is 1; zero to a negative exponent is division by zero.
 

@@ -242,8 +242,18 @@ internal static partial class XlsxPresentationSerializer
                 }
                 XElement? pane=sheet.Root.Element(S+"sheetViews")?.Element(S+"sheetView")?.Element(S+"pane");
                 if(pane is not null) {
-                    if((string?)pane.Attribute("state")!="frozen" || Int(pane,"ySplit")!=0) throw new NotSupportedException("Only frozen columns supported");
-                    session.SetFrozenColumns(Int(pane,"xSplit"));
+                    Attributes(pane,"xSplit","ySplit","topLeftCell","activePane","state");
+                    int columns=Int(pane,"xSplit"), rows=Int(pane,"ySplit");
+                    if((string?)pane.Attribute("state")!="frozen" || columns<0 || rows<0 ||
+                       columns>=session.Grid.Columns.Count || rows>=session.Grid.Rows.Count || columns+rows==0)
+                        throw new NotSupportedException("Invalid or unsupported frozen pane");
+                    string expected=WorksheetSession.ColumnName(columns)+(rows+1).ToString(CultureInfo.InvariantCulture);
+                    string activePane=columns>0?(rows>0?"bottomRight":"topRight"):"bottomLeft";
+                    if(!string.Equals((string?)pane.Attribute("topLeftCell"),expected,StringComparison.OrdinalIgnoreCase) ||
+                       !string.Equals((string?)pane.Attribute("activePane"),activePane,StringComparison.Ordinal))
+                        throw new InvalidDataException("Frozen pane coordinates do not match its splits");
+                    session.SetFrozenColumns(columns);
+                    session.SetFrozenRows(rows);
                 }
                 if(package.TryGetPartLength("xl/theme/theme1.xml",out _) == SheetStatus.Ok) {
                     string? name=(string?)BoundedXml.Load(package,"xl/theme/theme1.xml").Root?.Attribute("name");

@@ -65,62 +65,70 @@
         <Border Grid.Row="1"
                 Background="{DynamicResource PanelBrush}"
                 BorderBrush="{DynamicResource GridBrush}"
-                BorderThickness="0,0,0,1"
-                Padding="12,8">
-            <WrapPanel>
-                <Button Content="New Sheet" Click="NewSheet_Click"/>
-                <Button Content="Open XLSX" Click="OpenXlsx_Click"/>
-                <Button Content="Open CSV" Click="OpenCsv_Click"/>
-                <Button Content="Save CSV" Click="SaveCsv_Click"/>
-                <Button Content="Export XLSX" Click="ExportXlsx_Click"/>
-                <Separator Width="12" Opacity="0"/>
-                <Button Content="Undo" Click="Undo_Click" ToolTip="Ctrl+Z"/>
-                <Button Content="Redo" Click="Redo_Click" ToolTip="Ctrl+Y"/>
-                <Button Content="Freeze A" Click="FreezeFirstColumn_Click"/>
-                <Separator Width="12" Opacity="0"/>
-                <TextBox x:Name="FindBox" Width="170" Margin="0,0,6,0" ToolTip="Find in cell inputs · Ctrl+F"/>
-                <Button Content="Find Next" Click="FindNext_Click"/>
-                <Separator Width="12" Opacity="0"/>
-                <Button Content="Recalculate" Click="Recalculate_Click"/>
-                <Button Content="Verify Proof" Click="Verify_Click" Style="{StaticResource AccentButton}"/>
-                <Button Content="Copy Proof" Click="CopyProof_Click"/>
-            </WrapPanel>
-        </Border>
-
-        <Border Grid.Row="2"
-                Background="{DynamicResource PanelBrush}"
-                BorderBrush="{DynamicResource GridBrush}"
-                BorderThickness="0,0,0,1"
-                Padding="12,7">
-            <WrapPanel>
-                <TextBlock Text="Format" Margin="0,0,10,0" VerticalAlignment="Center" FontWeight="SemiBold"/>
-                <ComboBox x:Name="FontFamilyBox" Width="170" SelectionChanged="FontFamilyBox_SelectionChanged"/>
-                <ComboBox x:Name="FontSizeBox" Width="74" IsEditable="True" SelectionChanged="FontSizeBox_SelectionChanged"/>
-                <Button Content="B" Width="34" Padding="0,7" FontWeight="Bold" ToolTip="Bold" Click="Bold_Click"/>
-                <Button Content="I" Width="34" Padding="0,7" FontStyle="Italic" ToolTip="Italic" Click="Italic_Click"/>
-                <Button Width="34" Padding="0,7" ToolTip="Underline" Click="Underline_Click"><TextBlock Text="U" TextDecorations="Underline"/></Button>
-                <Button Content="Wrap" ToolTip="Wrap text" Click="Wrap_Click"/>
-                <ComboBox x:Name="NumberFormatBox" Width="112" SelectionChanged="NumberFormatBox_SelectionChanged"/>
-                <ComboBox x:Name="TextColorBox" Width="120" SelectionChanged="TextColorBox_SelectionChanged"/>
-                <ComboBox x:Name="FillColorBox" Width="120" SelectionChanged="FillColorBox_SelectionChanged"/>
-                <Button Content="Left" Click="AlignLeft_Click"/>
-                <Button Content="Center" Click="AlignCenter_Click"/>
-                <Button Content="Right" Click="AlignRight_Click"/>
-                <Button Content="Borders" Click="Borders_Click"/>
-                <Button Content="Table Style" Click="TableStyle_Click"/>
-                <Button Content="Create Table" Click="CreateTable_Click"/>
-                <Button Content="Table + Totals" Click="CreateTableTotals_Click" ToolTip="Create a table and add an exact SUM row below the selected data"/>
-                <Button Content="Sort ↑" Click="SortAscending_Click" ToolTip="Sort table view; row numbers remain native coordinates"/>
-                <Button Content="Sort ↓" Click="SortDescending_Click"/>
-                <Button Content="Original Order" Click="ResetSort_Click"/>
-                <ComboBox x:Name="ThemeBox" Width="165" SelectionChanged="ThemeBox_SelectionChanged" ToolTip="Worksheet theme"/>
-                <ComboBox x:Name="ChartKindBox" Width="85" ToolTip="Chart type"/>
-                <Button Content="Add Chart" Click="AddChart_Click"/>
-                <Button Content="Charts" Click="ViewCharts_Click"/>
-                <TextBox x:Name="RowHeightBox" Width="45" Text="24" ToolTip="Row height in points"/>
-                <Button Content="Row Height" Click="RowHeight_Click"/>
-                <Button Content="Clear Format" Click="ClearFormat_Click"/>
-            </WrapPanel>
+                BorderThickness="0,0,0,1">
+            <TabControl x:Name="RibbonTabs" Background="{DynamicResource PanelBrush}" BorderThickness="0">
+                <TabItem Header="Home">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="118">
+                        <WrapPanel Margin="8,7">
+                            <Button Content="New Sheet" Click="NewSheet_Click"/>
+                            <Button Content="Open XLSX" Click="OpenXlsx_Click"/>
+                            <Button Content="Open CSV" Click="OpenCsv_Click"/>
+                            <Button Content="Save CSV" Click="SaveCsv_Click"/>
+                            <Button Content="Export XLSX" Click="ExportXlsx_Click"/>
+                            <Button Content="Undo" Click="Undo_Click" ToolTip="Ctrl+Z"/>
+                            <Button Content="Redo" Click="Redo_Click" ToolTip="Ctrl+Y"/>
+                            <TextBox x:Name="FindBox" Width="170" Margin="0,0,6,0" ToolTip="Find in cell inputs · Ctrl+F"/>
+                            <Button Content="Find Next" Click="FindNext_Click"/>
+                            <Button Content="Recalculate" Click="Recalculate_Click"/>
+                            <Button Content="Verify Proof" Click="Verify_Click" Style="{StaticResource AccentButton}"/>
+                            <Button Content="Copy Proof" Click="CopyProof_Click"/>
+                            <ComboBox x:Name="FontFamilyBox" Width="150" ToolTip="Font family" SelectionChanged="FontFamilyBox_SelectionChanged"/>
+                            <ComboBox x:Name="FontSizeBox" Width="74" IsEditable="True" ToolTip="Font size" SelectionChanged="FontSizeBox_SelectionChanged"/>
+                            <Button Content="B" Width="34" Padding="0,7" FontWeight="Bold" ToolTip="Bold" Click="Bold_Click"/>
+                            <Button Content="I" Width="34" Padding="0,7" FontStyle="Italic" ToolTip="Italic" Click="Italic_Click"/>
+                            <Button Width="34" Padding="0,7" ToolTip="Underline" Click="Underline_Click"><TextBlock Text="U" TextDecorations="Underline"/></Button>
+                            <Button Content="Wrap" ToolTip="Wrap text" Click="Wrap_Click"/>
+                            <ComboBox x:Name="NumberFormatBox" Width="112" ToolTip="Number format" SelectionChanged="NumberFormatBox_SelectionChanged"/>
+                            <ComboBox x:Name="TextColorBox" Width="120" ToolTip="Text color" SelectionChanged="TextColorBox_SelectionChanged"/>
+                            <ComboBox x:Name="FillColorBox" Width="120" ToolTip="Cell fill" SelectionChanged="FillColorBox_SelectionChanged"/>
+                            <Button Content="Left" Click="AlignLeft_Click"/>
+                            <Button Content="Center" Click="AlignCenter_Click"/>
+                            <Button Content="Right" Click="AlignRight_Click"/>
+                            <Button Content="Borders" Click="Borders_Click"/>
+                            <Button Content="Table Style" Click="TableStyle_Click"/>
+                            <Button Content="Clear Format" Click="ClearFormat_Click"/>
+                        </WrapPanel>
+                    </ScrollViewer>
+                </TabItem>
+                <TabItem Header="Insert / Data">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="118">
+                        <WrapPanel Margin="8,7">
+                            <Button Content="Create Table" Click="CreateTable_Click"/>
+                            <Button Content="Table + Totals" Click="CreateTableTotals_Click" ToolTip="Create a table and add an exact SUM row below the selected data"/>
+                            <Button Content="Sort ↑" Click="SortAscending_Click" ToolTip="Sort table view; row numbers remain native coordinates"/>
+                            <Button Content="Sort ↓" Click="SortDescending_Click"/>
+                            <Button Content="Original Order" Click="ResetSort_Click"/>
+                            <ComboBox x:Name="ChartKindBox" Width="100" ToolTip="Chart type"/>
+                            <Button Content="Add Chart" Click="AddChart_Click"/>
+                            <Button Content="Charts" Click="ViewCharts_Click"/>
+                        </WrapPanel>
+                    </ScrollViewer>
+                </TabItem>
+                <TabItem Header="View">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="118">
+                        <WrapPanel Margin="8,7">
+                            <ComboBox x:Name="ThemeBox" Width="165" SelectionChanged="ThemeBox_SelectionChanged" ToolTip="Worksheet theme"/>
+                            <Button Content="Freeze A" Click="FreezeFirstColumn_Click" ToolTip="Toggle native frozen column A"/>
+                            <Button Content="Freeze to Selection" Click="FreezeSelection_Click" ToolTip="Freeze columns before the selected cell; row freezing is retained in XLSX but not rendered by WPF"/>
+                            <TextBox x:Name="RowHeightBox" Width="55" Text="24" ToolTip="Row height in points"/>
+                            <Button Content="Row Height" Click="RowHeight_Click"/>
+                            <TextBlock Text="WPF DataGrid cannot freeze rows; imported row splits are preserved in XLSX."
+                                       Margin="8,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedTextBrush}"
+                                       ToolTip="Row freeze coordinates remain model metadata and round-trip through XLSX; this view does not pin rows."/>
+                        </WrapPanel>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
         </Border>
 
         <Border Grid.Row="3"
@@ -194,8 +202,8 @@
             <DockPanel LastChildFill="True">
                 <Button DockPanel.Dock="Left"
                         Content="+"
-                        Width="32"
-                        Height="28"
+                        Width="36"
+                        Height="32"
                         Padding="0"
                         Click="NewSheet_Click"
                         ToolTip="Add sheet"/>
@@ -214,11 +222,26 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="ListBoxItem">
+                            <EventSetter Event="PreviewMouseRightButtonDown" Handler="SheetTabRightClick"/>
+                            <Setter Property="MinHeight" Value="32"/>
                             <Setter Property="Padding" Value="16,6"/>
                             <Setter Property="Margin" Value="0,0,4,0"/>
                             <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}"/>
                             <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
                             <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                            <Setter Property="ContextMenu">
+                                <Setter.Value>
+                                    <ContextMenu>
+                                        <MenuItem Header="Rename…" Click="SheetRename_Click"/>
+                                        <MenuItem Header="Duplicate" Click="SheetDuplicate_Click"/>
+                                        <Separator/>
+                                        <MenuItem Header="Move Left" Click="SheetMoveLeft_Click"/>
+                                        <MenuItem Header="Move Right" Click="SheetMoveRight_Click"/>
+                                        <Separator/>
+                                        <MenuItem Header="Delete" Click="SheetDelete_Click"/>
+                                    </ContextMenu>
+                                </Setter.Value>
+                            </Setter>
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate TargetType="ListBoxItem">

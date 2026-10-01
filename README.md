@@ -5,12 +5,12 @@ Local-first spreadsheet engine with a C11 native core, exact representable ratio
 | Layer | Implementation | Verification boundary |
 |---|---|---|
 | Arithmetic | canonical int64 rational operations; private wide intermediates | native boundary/property tests and independent Fraction oracle |
-| Formula | SUM, AVG/AVERAGE, MIN, MAX, COUNT/COUNTA, PRODUCT, ABS, ROUND, CEILING/FLOOR, lazy IF and numeric comparisons | native boundary tests, independent Fraction oracle and managed/native differential cases; bounded grammar |
+| Formula | SUM, AVG/AVERAGE, MIN, MAX, COUNT/COUNTA, PRODUCT, ABS, ROUND, CEILING/FLOOR, lazy IF/IFERROR, AND/OR/NOT and numeric comparisons | native boundary tests, independent Fraction oracle and managed/native differential cases; bounded grammar |
 | Dependencies | direct/range edges and filtered topological recalculation | failed-mutation regression; 100 random DAGs, 2,000 mutations |
 | Integrity | ABI-96 cell proofs and optional SQLite metadata ledger | existing tamper tests; not encryption, identity authentication or backup |
 | XLSX | supported native reader/writer subset; bounded ZIP validation | synthetic malformed/round-trip tests; not general Excel compatibility |
 | Managed | P/Invoke and OPC utilities | lifetime/concurrency/malformed-image regressions pass; see ABI.md |
-| Desktop | WPF editing, Undo/Redo, Find Next, freeze/selection indicators, formula syntax preview, typography/borders/wrap, number formats, dimensions and four themes | bounded XLSX style/layout import/export and WPF interaction contracts; see DESKTOP.md and FEATURE-GAP.md |
+| Desktop | WPF editing, Undo/Redo, Find Next, validated worksheet lifecycle, tabbed Home/Insert-Data/View commands, frozen columns, formula syntax preview, formatting, dimensions and four themes | bounded XLSX style/layout import/export and WPF interaction contracts; WPF does not render frozen rows; see DESKTOP.md and FEATURE-GAP.md |
 | Tables/charts | semantic ranges, exact SUM totals, coordinate-safe sort views; single-series Bar/Column/Line models, WPF rendering and XLSX parts | managed round-trip and actual WPF interaction tests; see TABLES.md and CHARTS.md |
 | Localization | English controls; Unicode cell strings | complete localization/RTL workflows remain unverified |
 

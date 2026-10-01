@@ -20,10 +20,11 @@ public partial class MainWindow
         OpenFileDialog dialog=new() {Title="Open XLSX",Filter="XLSX (*.xlsx)|*.xlsx",CheckFileExists=true};
         if(dialog.ShowDialog(this)!=true) return;
         IsEnabled=false; SetStatus("Reading and validating XLSX…");
+        string sheetName=_workbook.GetUniqueSheetName(SafeSheetNameFromPath(dialog.FileName));
         WorksheetSession? candidate=null;
         try {
             var result=await Task.Run(()=> {
-                var sheet=new WorksheetSession(Path.GetFileNameWithoutExtension(dialog.FileName));
+                var sheet=new WorksheetSession(sheetName);
                 bool ok=sheet.LoadXlsx(dialog.FileName,out string message); return (sheet,ok,message);
             });
             candidate=result.sheet;

@@ -256,6 +256,67 @@ namespace KHZ.Sheet.Tests
 					Fail("read I1");
 				}
 
+				Console.WriteLine("managed/native logical and error formulas:");
+				Expect(sheet.SetError(15u,0u,CellErrorCode.Div0)==SheetStatus.Ok,"P1 = #DIV/0!");
+				var logicalCases = new (string Formula,long Num,long Den,CellErrorCode Error)[] {
+					("AND(TRUE,1=1)",1,1,CellErrorCode.None),
+					("AND(TRUE,FALSE)",0,1,CellErrorCode.None),
+					("AND(J2,NOT(FALSE))",1,1,CellErrorCode.None),
+					("OR(FALSE,1=1)",1,1,CellErrorCode.None),
+					("NOT(FALSE)",1,1,CellErrorCode.None),
+					("IFERROR(1/0,2/7)",2,7,CellErrorCode.None),
+					("IFERROR(5/7,1/0)",5,7,CellErrorCode.None),
+					("IFERROR(P1,2/7)",2,7,CellErrorCode.None),
+					("AND(P1,TRUE)",0,1,CellErrorCode.Div0),
+					("IFERROR(AND(TRUE,NOT(FALSE)),0)",1,1,CellErrorCode.None)
+				};
+				for (uint index=0; index<(uint)logicalCases.Length; ++index)
+				{
+					var test=logicalCases[index];
+					Expect(FormulaParser.TryParse(test.Formula,out FormulaNode? ast)==SheetStatus.Ok && ast is not null,
+						"managed parser "+test.Formula);
+					if (ast is null) continue;
+					Expect(sheet.TryEvaluate(20u,index,ast,out KhzFormulaResult formulaResult)==SheetStatus.Ok &&
+						formulaResult.Error==(uint)test.Error &&
+						(test.Error!=CellErrorCode.None ||
+							(formulaResult.Value.Numerator==test.Num && formulaResult.Value.Denominator==test.Den)),
+						"managed lower/evaluate "+test.Formula);
+					Expect(Install(sheet,20u,index,test.Formula,out _) == SheetStatus.Ok,
+						"native parse "+test.Formula);
+				}
+				Expect(sheet.TryRecalculate(out _) == SheetStatus.Ok,"logical/error dependency batch recalculates");
+				for (uint index=0; index<(uint)logicalCases.Length; ++index)
+				{
+					var expected=logicalCases[index];
+					if(sheet.TryGetCell(20u,index,out KhzCellNative actual)==SheetStatus.Ok)
+						Expect(actual.ErrorCode==expected.Error &&
+							(expected.Error!=CellErrorCode.None ||
+								(actual.Value.Num==expected.Num && actual.Value.Den==expected.Den)),
+							"native result "+expected.Formula);
+					else Fail("read logical/error result "+expected.Formula);
+				}
+				foreach(string malformed in new[] {"AND()","NOT(1,2)","IFERROR(1)","IFERROR(1,2,3)"})
+				{
+					Expect(FormulaParser.TryParse(malformed,out FormulaNode? ast)==SheetStatus.Ok && ast is not null,
+						"managed parser malformed-call AST "+malformed);
+					if(ast is not null)
+						Expect(sheet.TryEvaluate(31u,0u,ast,out _)==SheetStatus.ErrFormat,
+							"managed lower rejects malformed call "+malformed);
+					Expect(Install(sheet,31u,0u,malformed,out _) == SheetStatus.ErrFormat,
+						"native parser rejects malformed call "+malformed);
+				}
+				Expect(Install(sheet,30u,0u,"IFERROR(1/A1,AND(FALSE,NOT(FALSE)))",out _)==SheetStatus.Ok,
+					"install dependent IFERROR formula");
+				KhzCellNative dependent;
+				Expect(sheet.TryRecalculate(out _) == SheetStatus.Ok &&
+					sheet.TryGetCell(30u,0u,out dependent)==SheetStatus.Ok &&
+					dependent.ErrorCode==CellErrorCode.None && dependent.Value.Num==1L && dependent.Value.Den==15L,
+					"dependent IFERROR evaluates exact reciprocal");
+				Expect(sheet.SetInt64(0u,0u,0L)==SheetStatus.Ok && sheet.TryRecalculate(out _) == SheetStatus.Ok &&
+					sheet.TryGetCell(30u,0u,out dependent)==SheetStatus.Ok &&
+					dependent.ErrorCode==CellErrorCode.None && dependent.Value.Num==0L,
+					"dependency update selects IFERROR fallback");
+
 				Console.WriteLine("chain:");
 				SheetStatus verified = sheet.VerifyChain(out nuint failedIndex);
 				Expect(verified == SheetStatus.Ok,

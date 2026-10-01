@@ -90,6 +90,27 @@ internal static class Program
                 Check(loaded.Grid.Rows[1][0].ToString()=="مرحبا" && loaded.Grid.Rows[6][2].ToString()=="51/4","Unicode and formula recalculation round-trip");
                 string again=Path.Combine(dir,"again-"+theme.Name.Replace(' ','_')+".xlsx");Check(loaded.ExportXlsx(again,out _),"re-export imported presentation");
             }
+            foreach(var (columns,rows,topLeft,activePane) in new[] {
+                (0,2,"A3","bottomLeft"),(1,0,"B1","topRight"),(1,2,"B3","bottomRight") })
+            {
+                using var panes=new WorksheetSession("Panes");
+                panes.SetFrozenColumns(columns);panes.SetFrozenRows(rows);
+                string path=Path.Combine(dir,$"panes-{columns}-{rows}.xlsx");
+                Check(panes.ExportXlsx(path,out string exportMessage),"export frozen pane "+exportMessage);
+                using(var archive=ZipFile.OpenRead(path))
+                using(var xml=archive.GetEntry("xl/worksheets/sheet1.xml")!.Open())
+                {
+                    XElement pane=XDocument.Load(xml).Descendants(XName.Get("pane","http://schemas.openxmlformats.org/spreadsheetml/2006/main")).Single();
+                    Check((string?)pane.Attribute("xSplit")==columns.ToString() &&
+                        (string?)pane.Attribute("ySplit")==rows.ToString() &&
+                        (string?)pane.Attribute("topLeftCell")==topLeft &&
+                        (string?)pane.Attribute("activePane")==activePane,"frozen pane XML coordinates");
+                }
+                using var loaded=new WorksheetSession("Imported");
+                Check(loaded.LoadXlsx(path,out string importMessage) &&
+                    loaded.FrozenColumns==columns && loaded.FrozenRows==rows,
+                    "frozen pane round trip "+importMessage);
+            }
             string good=Path.Combine(dir,"Corporate_Blue.xlsx");
             Check(!s.CommitCell(0,1,"Label",out _),"duplicate table header refused");
             Edit(s,0,1,"Revenue");Check(s.Tables[0].Columns[1]=="Revenue","header edit updates table metadata");
@@ -110,6 +131,7 @@ internal static class Program
             var attacks=new (string Name,string Part,Func<string,string> Edit)[] {
                 ("style index","xl/worksheets/sheet1.xml",x=>x.Replace("s=\"1\"","s=\"999999\"")),
                 ("bad RGB","xl/styles.xml",x=>x.Replace("FF123456","GG123456")),
+                ("frozen pane coordinates","xl/worksheets/sheet1.xml",x=>x.Replace("topLeftCell=\"B1\"","topLeftCell=\"A1\"")),
                 ("invalid surrogate","xl/sharedStrings.xml",x=>x.Replace("مرحبا","_xD800_")),
                 ("wide columns","xl/worksheets/sheet1.xml",x=>x.Replace("max=\"1\"","max=\"16385\"")),
                 ("DTD","xl/styles.xml",x=>"<!DOCTYPE styleSheet [<!ENTITY x SYSTEM 'file:///C:/Windows/win.ini'>]>"+x[(x.IndexOf("?>",StringComparison.Ordinal)+2)..]),
@@ -150,17 +172,96 @@ internal static class Program
                     Check(native.TrySetFormula(9,9,f,out _)==SheetStatus.Ok && native.TryRecalculate(out _)==SheetStatus.Ok,"native parse/recalc "+f);
                     Check(native.TryGetCell(9,9,out var cell)==SheetStatus.Ok && (uint)cell.ErrorCode==managed.Error && cell.Value.Num==managed.Value.Numerator && cell.Value.Den==managed.Value.Denominator,"numeric parity "+f);
                 }
+                foreach(string f in new[] {"AND()","NOT(1,2)","IFERROR(1)","IFERROR(1,2,3)"}) {
+                    Check(FormulaParser.TryParse(f,out FormulaNode? ast)==SheetStatus.Ok && ast is not null,"managed parse malformed call "+f);
+                    Check(native.TryEvaluate(9,9,ast!,out _)==SheetStatus.ErrFormat &&
+                        native.TrySetFormula(9,9,f,out _)==SheetStatus.ErrFormat,"managed and native reject malformed call "+f);
+                }
+            }
+            using(var workbook=new WorkbookSession())
+            {
+                WorksheetSession original=workbook.Sheets[0];
+                Check(WorkbookSession.IsValidSheetName("Sheet 1") &&
+                    !WorkbookSession.IsValidSheetName("") && !WorkbookSession.IsValidSheetName(new string('x',32)) &&
+                    !WorkbookSession.IsValidSheetName("bad/name") && !WorkbookSession.IsValidSheetName("'bad") &&
+                    !WorkbookSession.IsValidSheetName("bad'") && !WorkbookSession.IsValidSheetName("bad*name") &&
+                    !WorkbookSession.IsValidSheetName("bad[name"),"Excel worksheet name rules");
+                Check(!workbook.RenameSheet(original,"bad/name",out _),"invalid rename refused");
+                bool rejectedInvalidAdd=false;
+                try { workbook.AddSheet("bad:name"); } catch(ArgumentException) { rejectedInvalidAdd=true; }
+                Check(rejectedInvalidAdd,"invalid add name refused");
+                WorksheetSession other=workbook.AddSheet("Other");
+                Check(!workbook.RenameSheet(original,"oTHER",out _),"case-insensitive duplicate rename refused");
+                Check(workbook.RenameSheet(other,"Revenue",out _),"rename accepted");
+                WorksheetSession duplicateName=workbook.AddSheet("Revenue");
+                Check(duplicateName.Name=="Revenue 2","duplicate add name made unique");
+                Check(workbook.RenameSheet(original,new string('S',31),out _),"31-character worksheet name accepted");
+                Edit(original,0,0,"Category"); Edit(original,0,1,"Amount");
+                Edit(original,1,0,"Synthetic-A"); Edit(original,1,1,"=1/2");
+                Edit(original,2,0,"Synthetic-B"); Edit(original,2,1,"=1/3");
+                Edit(original,1,2,"=IFERROR(1/B2,AND(FALSE,NOT(FALSE)))");
+                Check(original.Grid.Rows[1][2].ToString()=="2","managed logical/error formula result");
+                Edit(original,1,1,"0");
+                Check(original.Grid.Rows[1][2].ToString()=="0","managed logical/error dependency recalculation");
+                Edit(original,1,1,"=1/2");
+                Check(original.ApplyFormat([(1,1)],new CellFormat(Bold:true,Foreground:"#123456"),out _),"source explicit format");
+                Check(original.ApplyTableFormat(new CellRange(0,0,2,1),out _),"source table format");
+                Check(original.CreateTable(new CellRange(0,0,2,1),"SyntheticTable",false,out _),"source table metadata");
+                Check(original.AddChart(ChartKind.Line,new CellRange(0,0,2,1),out _),"source chart metadata");
+                original.SetTheme(SheetTheme.Presets[3]);
+                Check(original.SetColumnWidth(1,19)&&original.SetRowHeight(2,27),"source dimensions");
+                original.SetFrozenColumns(1); original.SetFrozenRows(2);
+                Check(workbook.DuplicateSheet(original,null,out WorksheetSession? copy,out string copyMessage),
+                    "deep duplicate "+copyMessage);
+                Check(copy is not null && copy.Name.Length<=31 && copy.Name.EndsWith(" Copy",StringComparison.Ordinal) &&
+                    copy.GetInput(1,1)=="=1/2" &&
+                    copy.GetInput(1,2)=="=IFERROR(1/B2,AND(FALSE,NOT(FALSE)))" &&
+                    copy.Grid.Rows[1][1].ToString()=="1/2" && copy.Grid.Rows[1][2].ToString()=="2" &&
+                    copy.GetEffectiveFormat(1,1).Bold==true && copy.Tables.Count==1 && copy.Charts.Count==1 &&
+                    copy.Tables[0].Id!=original.Tables[0].Id && copy.Charts[0].Id!=original.Charts[0].Id &&
+                    copy.Theme==original.Theme && copy.ColumnWidths[1]==19 && copy.RowHeights[2]==27 &&
+                    copy.FrozenColumns==1 && copy.FrozenRows==2,"duplicate copies values and modeled worksheet state");
+                WorksheetSession clone=copy!;
+                clone.ApplyFormat([(1,1)],new CellFormat(Foreground:"#654321"),out _);
+                clone.SetFrozenRows(3);clone.SetRowHeight(2,30);clone.SetTheme(SheetTheme.Presets[0]);
+                Check(original.GetEffectiveFormat(1,1).Foreground=="#123456" && original.FrozenRows==2 &&
+                    original.RowHeights[2]==27 && original.Theme==SheetTheme.Presets[3],"duplicate presentation state is independent");
+                Check(clone.CommitCell(0,0,"CopyLabel",out _) && original.GetInput(0,0)=="Category" &&
+                    clone.Tables[0].Columns[0]=="CopyLabel" && original.Tables[0].Columns[0]=="Category",
+                    "duplicate cell and table metadata are independent");
+                Check(clone.AddChart(ChartKind.Column,new CellRange(0,0,2,1),out _) && clone.Charts.Count==2 &&
+                    original.Charts.Count==1,"duplicate chart collection is independent");
+                Check(clone.CommitCell(1,1,"2",out _) && original.GetInput(1,1)=="=1/2" &&
+                    clone.Grid.Rows[1][1].ToString()=="2" && clone.Grid.Rows[1][2].ToString()=="1/2" &&
+                    original.Grid.Rows[1][2].ToString()=="2","duplicate formulas and dependencies are independent");
+                Check(workbook.MoveSheet(clone,1,out _) && workbook.Sheets.IndexOf(clone)==2 &&
+                    workbook.MoveSheet(clone,-1,out _) && workbook.Sheets.IndexOf(clone)==1,
+                    "move worksheet left and right");
+                Check(!workbook.MoveSheet(original,-1,out _) && workbook.Sheets.Count==4,
+                    "worksheet move boundary");
+                Check(workbook.DeleteSheet(clone,out _) && !workbook.Sheets.Contains(clone),"delete worksheet");
+                while(workbook.Sheets.Count>1) Check(workbook.DeleteSheet(workbook.Sheets[1],out _),"delete non-final worksheet");
+                Check(!workbook.DeleteSheet(original,out _) && workbook.Sheets.Single()==original,"final worksheet cannot be deleted");
             }
             App app=new();app.InitializeComponent();app.ShutdownMode=ShutdownMode.OnExplicitShutdown;
             MainWindow window=new();window.Show();window.UpdateLayout();
             ListBox tabs=(ListBox)window.FindName("SheetList");
             ((ObservableCollection<WorksheetSession>)tabs.ItemsSource).Add(s);tabs.SelectedItem=s;
+            window.UpdateLayout();
+            TabControl ribbon=(TabControl)window.FindName("RibbonTabs");
+            void ShowTab(string header)=>ribbon.SelectedItem=ribbon.Items.Cast<TabItem>().Single(t=>(string)t.Header==header);
+            Check(ribbon.Items.Cast<TabItem>().Select(t=>(string)t.Header)
+                .SequenceEqual(new[] {"Home","Insert / Data","View"}),"ribbon command groups are available");
+            var tabContainer=(ListBoxItem)tabs.ItemContainerGenerator.ContainerFromItem(s);
+            Check(tabContainer.ContextMenu?.Items.OfType<MenuItem>().Select(m=>(string)m.Header)
+                .SequenceEqual(new[] {"Rename…","Duplicate","Move Left","Move Right","Delete"})==true,
+                "worksheet tabs expose lifecycle context actions");
             ComboBox themeBox=(ComboBox)window.FindName("ThemeBox");themeBox.SelectedIndex=2;
             DataGrid grid=(DataGrid)window.FindName("SheetGrid");
             grid.CurrentCell=new DataGridCellInfo(s.Grid.DefaultView[1],grid.Columns[1]);
             grid.SelectedCells.Add(grid.CurrentCell);window.UpdateLayout();
             void Click(string title)=>Visuals<Button>(window).Single(b=>b.Content is string text && text==title).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            Click("Sort ↑");Pump();
+            ShowTab("Insert / Data");Click("Sort ↑");Pump();
             Check(grid.Columns.Count==s.Grid.Columns.Count && !grid.Columns[1].IsReadOnly,"sort retains editable table descriptors");
             var first=(DataRowView)grid.Items[1];Check(s.Grid.Rows.IndexOf(first.Row)==3,"actual sort button retains coordinates");
             grid.CurrentCell=new DataGridCellInfo(first,grid.Columns[1]);grid.SelectedCells.Clear();grid.SelectedCells.Add(grid.CurrentCell);grid.ScrollIntoView(first,grid.Columns[1]);window.UpdateLayout();
@@ -179,11 +280,12 @@ internal static class Program
             grid.Columns[0].Width=134.5;window.UpdateLayout();
             grid.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,0,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonUpEvent});
             Check(Math.Abs(s.ColumnWidths[0]-18.5)<.01,"column resize captured in XLSX width units");
-            ((TextBox)window.FindName("RowHeightBox")).Text="30";Click("Row Height");
+            ShowTab("View");((TextBox)window.FindName("RowHeightBox")).Text="30";Click("Row Height");
             Check(s.RowHeights[3]==30,"row height control targets native row");
             TextBox formula=(TextBox)window.FindName("FormulaBox");formula.Text="=IF(A1>2,ROUND(1.005,2),0)";
             window.UpdateLayout();Check(((TextBlock)window.FindName("FormulaSyntax")).Inlines.Count>5,"formula bar highlighting executes");
             Check(Equals(themeBox.SelectedItem,SheetTheme.Presets[2]),"theme switch interaction");
+            ShowTab("View");
             foreach(var theme in SheetTheme.Presets) {
                 themeBox.SelectedItem=theme;Pump();window.UpdateLayout();
                 Check(s.Theme==theme && ((SolidColorBrush)window.FindResource("WindowBrush")).Color==(Color)ColorConverter.ConvertFromString(theme.Background),"theme binding "+theme.Name);

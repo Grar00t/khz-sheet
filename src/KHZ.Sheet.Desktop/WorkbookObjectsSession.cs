@@ -20,8 +20,9 @@ public sealed partial class WorksheetSession
     public IReadOnlyDictionary<int,double> RowHeights => _rowHeights;
     public SheetTheme? Theme { get; private set; }
     public int FrozenColumns { get; private set; }
+    public int FrozenRows { get; private set; }
     internal bool HasWorkbookObjects => Theme is not null || Tables.Count != 0 || Charts.Count != 0 ||
-        ColumnWidths.Count != 0 || RowHeights.Count != 0 || FrozenColumns != 0;
+        ColumnWidths.Count != 0 || RowHeights.Count != 0 || FrozenColumns != 0 || FrozenRows != 0;
     public bool SetColumnWidth(int column, double width)
     {
         if (column < 0 || column >= Grid.Columns.Count || !double.IsFinite(width) || width is < 1 or > 255) return false;
@@ -41,6 +42,60 @@ public sealed partial class WorksheetSession
     {
         if (columns < 0 || columns >= Grid.Columns.Count) throw new ArgumentOutOfRangeException(nameof(columns));
         FrozenColumns = columns;
+    }
+    public void SetFrozenRows(int rows)
+    {
+        if (rows < 0 || rows >= Grid.Rows.Count) throw new ArgumentOutOfRangeException(nameof(rows));
+        FrozenRows = rows;
+    }
+
+    internal bool TryDeepClone(string name, out WorksheetSession? clone, out string message)
+    {
+        clone = new WorksheetSession(name);
+        if (EngineAvailable && !clone.EngineAvailable)
+        {
+            message = clone.EngineSummary;
+            clone.Dispose();
+            clone = null;
+            return false;
+        }
+        foreach (var pair in _inputs)
+        {
+            DecodeKey(pair.Key, out int row, out int column);
+            if (!clone.EngineAvailable)
+            {
+                clone._inputs.Add(pair.Key, pair.Value);
+                clone.Grid.Rows[row][column] = pair.Value;
+                continue;
+            }
+            bool text = pair.Value.StartsWith('\'');
+            string input = text ? pair.Value[1..] : pair.Value;
+            if (clone.ImportValue(row, column, input, text, out message)) continue;
+            clone.Dispose();
+            clone = null;
+            return false;
+        }
+        if (clone.EngineAvailable && !clone.Recalculate(out message))
+        {
+            clone.Dispose();
+            clone = null;
+            return false;
+        }
+        foreach (var item in _formats) clone._formats.Add(item.Key, item.Value);
+        clone._tableFormats.AddRange(_tableFormats.Select(t => t with { Id = Guid.NewGuid() }));
+        clone._tables.AddRange(_tables.Select(t => t with
+        {
+            Id = Guid.NewGuid(),
+            Columns = Array.AsReadOnly(t.Columns.ToArray())
+        }));
+        clone._charts.AddRange(_charts.Select(c => c with { Id = Guid.NewGuid() }));
+        foreach (var item in _columnWidths) clone._columnWidths.Add(item.Key, item.Value);
+        foreach (var item in _rowHeights) clone._rowHeights.Add(item.Key, item.Value);
+        clone.Theme = Theme;
+        clone.FrozenColumns = FrozenColumns;
+        clone.FrozenRows = FrozenRows;
+        message = $"duplicated · {name}";
+        return true;
     }
     private sealed record ObjectEdit(TableDefinition? Table, ChartDefinition? Chart) : WorksheetEdit;
     private sealed record TableTotalsEdit(TableDefinition Table, IReadOnlyList<CellEdit> Cells) : WorksheetEdit;
@@ -253,7 +308,7 @@ public sealed partial class WorksheetSession
         _charts.Clear(); _charts.AddRange(candidate._charts);
         _columnWidths.Clear(); foreach(var item in candidate._columnWidths) _columnWidths.Add(item.Key,item.Value);
         _rowHeights.Clear(); foreach(var item in candidate._rowHeights) _rowHeights.Add(item.Key,item.Value);
-        Theme=candidate.Theme; FrozenColumns=candidate.FrozenColumns; EngineStatus=candidate.EngineStatus;
+        Theme=candidate.Theme; FrozenColumns=candidate.FrozenColumns; FrozenRows=candidate.FrozenRows; EngineStatus=candidate.EngineStatus;
         foreach(DataRow row in Grid.Rows) foreach(DataColumn col in Grid.Columns) row[col]="";
         _undo.Clear(); _redo.Clear(); RefreshComputedCells(); return true;
     }

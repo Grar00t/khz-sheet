@@ -115,6 +115,105 @@ public partial class MainWindow : Window
         SetStatus($"created · {sheet.Name}");
     }
 
+    private WorksheetSession? ContextSheet(object sender) =>
+        sender is MenuItem { Parent: ContextMenu { PlacementTarget: ListBoxItem item } }
+            ? item.DataContext as WorksheetSession
+            : null;
+
+    private void SheetTabRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is ListBoxItem item) item.IsSelected = true;
+    }
+
+    private string? PromptSheetName(string title, string initialName)
+    {
+        Window dialog = new()
+        {
+            Title = title,
+            Owner = this,
+            Width = 360,
+            Height = 160,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Style = (Style)FindResource(typeof(Window))
+        };
+        TextBox input = new() { Text = initialName, Margin = new Thickness(0, 8, 0, 12) };
+        Button accept = new() { Content = "OK", Width = 84, IsDefault = true };
+        Button cancel = new() { Content = "Cancel", Width = 84, IsCancel = true };
+        accept.Click += (_, _) => dialog.DialogResult = true;
+        StackPanel buttons = new() { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        buttons.Children.Add(accept);
+        buttons.Children.Add(cancel);
+        StackPanel content = new() { Margin = new Thickness(16) };
+        content.Children.Add(new TextBlock { Text = "Worksheet name (1-31 characters)" });
+        content.Children.Add(input);
+        content.Children.Add(buttons);
+        dialog.Content = content;
+        dialog.Loaded += (_, _) => { input.Focus(); input.SelectAll(); };
+        return dialog.ShowDialog() == true ? input.Text : null;
+    }
+
+    private void SheetRename_Click(object sender, RoutedEventArgs e)
+    {
+        WorksheetSession? sheet = ContextSheet(sender);
+        if (sheet is null) return;
+        string? name = PromptSheetName("Rename worksheet", sheet.Name);
+        if (name is null) return;
+        if (_workbook.RenameSheet(sheet, name, out string message))
+        {
+            SheetList.Items.Refresh();
+            SetStatus(message);
+        }
+        else SetStatus(message);
+    }
+
+    private void SheetDuplicate_Click(object sender, RoutedEventArgs e)
+    {
+        WorksheetSession? sheet = ContextSheet(sender);
+        if (sheet is null) return;
+        if (_workbook.DuplicateSheet(sheet, null, out WorksheetSession? duplicate, out string message))
+        {
+            SheetList.SelectedItem = duplicate;
+            SetStatus(message);
+        }
+        else SetStatus(message);
+    }
+
+    private void SheetMoveLeft_Click(object sender, RoutedEventArgs e)
+    {
+        WorksheetSession? sheet = ContextSheet(sender);
+        if (sheet is null) return;
+        _workbook.MoveSheet(sheet, -1, out string message);
+        SheetList.SelectedItem = sheet;
+        SetStatus(message);
+    }
+
+    private void SheetMoveRight_Click(object sender, RoutedEventArgs e)
+    {
+        WorksheetSession? sheet = ContextSheet(sender);
+        if (sheet is null) return;
+        _workbook.MoveSheet(sheet, 1, out string message);
+        SheetList.SelectedItem = sheet;
+        SetStatus(message);
+    }
+
+    private void SheetDelete_Click(object sender, RoutedEventArgs e)
+    {
+        WorksheetSession? sheet = ContextSheet(sender);
+        if (sheet is null) return;
+        if (MessageBox.Show(this, $"Delete worksheet '{sheet.Name}'?", "Delete worksheet",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        int index = SheetList.Items.IndexOf(sheet);
+        if (!_workbook.DeleteSheet(sheet, out string message))
+        {
+            SetStatus(message);
+            return;
+        }
+        if (SheetList.SelectedItem is not WorksheetSession)
+            SheetList.SelectedIndex = Math.Min(Math.Max(index - 1, 0), SheetList.Items.Count - 1);
+        SetStatus(message);
+    }
+
     private void OpenCsv_Click(object sender, RoutedEventArgs e)
     {
         OpenFileDialog dialog = new()
@@ -129,7 +228,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        WorksheetSession sheet = _workbook.AddSheet(Path.GetFileNameWithoutExtension(dialog.FileName));
+        WorksheetSession sheet = _workbook.AddSheet(SafeSheetNameFromPath(dialog.FileName));
         SheetList.SelectedItem = sheet;
 
         try
@@ -288,6 +387,21 @@ public partial class MainWindow : Window
         CurrentSheet?.SetFrozenColumns(SheetGrid.FrozenColumnCount);
         RefreshRealizedCellStyles();
         SetStatus(SheetGrid.FrozenColumnCount == 0 ? "column A unfrozen" : "column A frozen");
+    }
+
+    private void FreezeSelection_Click(object sender, RoutedEventArgs e)
+    {
+        if (CurrentSheet is not WorksheetSession sheet ||
+            !TryCurrentCoordinate(out _, out int column) || column == 0)
+        {
+            SetStatus("select a cell in column B or later to freeze preceding columns");
+            return;
+        }
+        int columns = SheetGrid.FrozenColumnCount == column ? 0 : column;
+        SheetGrid.FrozenColumnCount = columns;
+        sheet.SetFrozenColumns(columns);
+        RefreshRealizedCellStyles();
+        SetStatus(columns == 0 ? "frozen columns cleared" : $"columns A:{WorksheetSession.ColumnName(columns - 1)} frozen");
     }
 
     private void FindNext_Click(object sender, RoutedEventArgs e) => FindNextInput();
@@ -770,6 +884,15 @@ public partial class MainWindow : Window
         char[] invalid = Path.GetInvalidFileNameChars();
         string safe = string.Concat(name.Select(c => invalid.Contains(c) ? '_' : c));
         return string.IsNullOrWhiteSpace(safe) ? "Sheet" : safe;
+    }
+
+    private static string SafeSheetNameFromPath(string path)
+    {
+        string raw = Path.GetFileNameWithoutExtension(path);
+        char[] invalid = [':', '\\', '/', '?', '*', '[', ']'];
+        string name = string.Concat(raw.Select(c => invalid.Contains(c) ? '_' : c)).Trim('\'');
+        if (name.Length > 31) name = name[..31].TrimEnd('\'');
+        return name.Length == 0 ? "Imported" : name;
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)

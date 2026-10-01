@@ -1,5 +1,8 @@
-# Windows and subsystem enhancement (2026-09-30)
+# Local-first formula and worksheet improvements (2026-10-01)
 
+- Add exact AND/OR/NOT/IFERROR formulas, lazy IFERROR fallback evaluation, validated worksheet lifecycle actions, and row/column/combined frozen-pane XLSX round trips. Organize desktop commands into Home, Insert / Data and View tabs; WPF row freezing remains unavailable.
+
+## Windows and subsystem enhancement (2026-09-30)
 - Enable/probe MSVC C11 atomics and Windows LEDGER=AUTO fallback; default strict native/managed warnings and scoped compiler TEMP handling in verification.
 - Add exact COUNT/COUNTA, PRODUCT, ABS, ROUND, CEILING, FLOOR, lazy IF and comparisons. Align managed range/function lowering and bound managed parsing; reject literals without exact source text.
 - Round-trip explicit RGB styles, independent borders, supported custom formats, dimensions, frozen columns and four themes through a bounded, staged desktop XLSX importer.

@@ -21,14 +21,99 @@ public sealed class WorkbookSession : IDisposable
 
     public WorksheetSession AddSheet(string? requestedName = null)
     {
-        string name = string.IsNullOrWhiteSpace(requestedName)
-            ? NextAvailableName()
-            : MakeUniqueName(requestedName.Trim());
+        string name = requestedName is null ? NextAvailableName() : GetUniqueSheetName(requestedName);
 
         WorksheetSession sheet = new(name);
         Sheets.Add(sheet);
         return sheet;
     }
+
+    internal string GetUniqueSheetName(string requestedName)
+    {
+        if (!IsValidSheetName(requestedName))
+            throw new ArgumentException("Worksheet names must be 1-31 characters and cannot contain : \\ / ? * [ ] or boundary apostrophes.", nameof(requestedName));
+        return MakeUniqueName(requestedName);
+    }
+
+    public bool RenameSheet(WorksheetSession sheet, string name, out string message)
+    {
+        message = "worksheet does not belong to this workbook";
+        if (!Sheets.Contains(sheet)) return false;
+        message = "worksheet name must be 1-31 characters and cannot contain : \\ / ? * [ ] or boundary apostrophes";
+        if (!IsValidSheetName(name)) return false;
+        if (Sheets.Any(other => !ReferenceEquals(other, sheet) &&
+            string.Equals(other.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            message = "worksheet names must be unique ignoring case";
+            return false;
+        }
+        sheet.Name = name;
+        message = $"renamed · {name}";
+        return true;
+    }
+
+    public bool DuplicateSheet(WorksheetSession source, string? requestedName,
+                               out WorksheetSession? duplicate, out string message)
+    {
+        duplicate = null;
+        message = "worksheet does not belong to this workbook";
+        if (!Sheets.Contains(source)) return false;
+        string name = requestedName is null
+            ? MakeUniqueName(source.Name[..Math.Min(source.Name.Length, 26)] + " Copy")
+            : requestedName;
+        if (!IsValidSheetName(name))
+        {
+            message = "worksheet name must be 1-31 characters and cannot contain : \\ / ? * [ ] or boundary apostrophes";
+            return false;
+        }
+        if (Sheets.Any(other => string.Equals(other.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            message = "worksheet names must be unique ignoring case";
+            return false;
+        }
+        if (!source.TryDeepClone(name, out duplicate, out message)) return false;
+        Sheets.Insert(Sheets.IndexOf(source) + 1, duplicate!);
+        return true;
+    }
+
+    public bool MoveSheet(WorksheetSession sheet, int offset, out string message)
+    {
+        int index = Sheets.IndexOf(sheet);
+        if (index < 0 || offset is not (-1 or 1))
+        {
+            message = "worksheet cannot move in that direction";
+            return false;
+        }
+        int target = index + offset;
+        if (target < 0 || target >= Sheets.Count)
+        {
+            message = "worksheet cannot move in that direction";
+            return false;
+        }
+        Sheets.Move(index, target);
+        message = $"moved · {sheet.Name}";
+        return true;
+    }
+
+    public bool DeleteSheet(WorksheetSession sheet, out string message)
+    {
+        message = "worksheet does not belong to this workbook";
+        if (!Sheets.Contains(sheet)) return false;
+        if (Sheets.Count == 1)
+        {
+            message = "a workbook must keep at least one worksheet";
+            return false;
+        }
+        Sheets.Remove(sheet);
+        sheet.Dispose();
+        message = $"deleted · {sheet.Name}";
+        return true;
+    }
+
+    public static bool IsValidSheetName(string? name) =>
+        name is { Length: >= 1 and <= 31 } &&
+        name[0] != '\'' && name[^1] != '\'' &&
+        name.IndexOfAny([':', '\\', '/', '?', '*', '[', ']']) < 0;
 
     private string NextAvailableName()
     {
@@ -50,12 +135,14 @@ public sealed class WorkbookSession : IDisposable
         }
 
         int suffix = 2;
-        while (Sheets.Any(s => string.Equals(s.Name, $"{requested} {suffix}", StringComparison.OrdinalIgnoreCase)))
+        while (true)
         {
+            string tail = $" {suffix}";
+            string candidate = requested[..Math.Min(requested.Length, 31 - tail.Length)] + tail;
+            if (!Sheets.Any(s => string.Equals(s.Name, candidate, StringComparison.OrdinalIgnoreCase)))
+                return candidate;
             suffix++;
         }
-
-        return $"{requested} {suffix}";
     }
 
     public void Dispose()
@@ -113,7 +200,7 @@ public sealed partial class WorksheetSession : IDisposable
         }
     }
 
-    public string Name { get; }
+    public string Name { get; internal set; }
 
     public DataTable Grid { get; }
 

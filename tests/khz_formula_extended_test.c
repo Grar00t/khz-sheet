@@ -54,10 +54,12 @@ int main(void)
     value(&sheet,"IF(1/0,1,2)",0,1,KHZ_CELL_ERROR_DIV0);
     value(&sheet,"AND(TRUE,1=1)",1,1,0);
     value(&sheet,"AND(TRUE,FALSE,1=1)",0,1,0);
+    value(&sheet,"AND(A4,TRUE)",1,1,0);
     value(&sheet,"OR(FALSE,1=2)",0,1,0);
     value(&sheet,"OR(FALSE,1=1)",1,1,0);
     value(&sheet,"NOT(0)",1,1,0);
     value(&sheet,"NOT(3/7)",0,1,0);
+    value(&sheet,"NOT(A4)",0,1,0);
     value(&sheet,"IFERROR(1/0,2/7)",2,7,0);
     value(&sheet,"IFERROR(5/7,1/0)",5,7,0);
     value(&sheet,"IFERROR(A5,2/7)",2,7,0);

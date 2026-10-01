@@ -35,12 +35,15 @@ internal static partial class XlsxPresentationSerializer
             row.SetAttributeValue("ht",pair.Value.ToString("R",CultureInfo.InvariantCulture));row.SetAttributeValue("customHeight",1);
         }
         data.ReplaceNodes(rows.OrderBy(p=>p.Key).Select(p=>p.Value));
-        if(session.FrozenColumns>0)
+        if(session.FrozenColumns>0 || session.FrozenRows>0)
         {
             root.Element(S+"sheetViews")?.Remove();
+            int columns=session.FrozenColumns, rowSplit=session.FrozenRows;
+            string topLeft=WorksheetSession.ColumnName(columns)+(rowSplit+1).ToString(CultureInfo.InvariantCulture);
+            string activePane=columns>0?(rowSplit>0?"bottomRight":"topRight"):"bottomLeft";
             var views=new XElement(S+"sheetViews",new XElement(S+"sheetView",new XAttribute("workbookViewId",0),
-                new XElement(S+"pane",new XAttribute("xSplit",session.FrozenColumns),new XAttribute("topLeftCell",WorksheetSession.ColumnName(session.FrozenColumns)+"1"),
-                    new XAttribute("activePane","topRight"),new XAttribute("state","frozen"))));
+                new XElement(S+"pane",new XAttribute("xSplit",columns),new XAttribute("ySplit",rowSplit),
+                    new XAttribute("topLeftCell",topLeft),new XAttribute("activePane",activePane),new XAttribute("state","frozen"))));
             var dimension=root.Element(S+"dimension");
             if(dimension is null) root.AddFirst(views); else dimension.AddAfterSelf(views);
         }
