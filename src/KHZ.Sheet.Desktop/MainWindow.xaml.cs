@@ -1,5 +1,9 @@
 using System.Data;
+using System.Globalization;
 using System.IO;
+using System.Numerics;
+using System.Text.Json;
+using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -16,9 +20,13 @@ public partial class MainWindow : Window
 {
     private readonly WorkbookSession _workbook = new();
     private readonly DispatcherTimer _headerSelectionTimer = new() { Interval = TimeSpan.FromMilliseconds(35) };
+    private readonly DispatcherTimer _recoveryDebounceTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly DispatcherTimer _recoveryTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private bool _rebinding;
     private bool _formatControlReady;
     private string? _editError;
+    private sealed record RecoveryEntry(string Name,string FileName);
+    private sealed record RecoveryManifest(int Version,string Generation,RecoveryEntry[] Sheets);
 
     private sealed record ColorChoice(string Name, string? Hex);
     private sealed record NumberFormatChoice(string Name, CellNumberFormat Format);
@@ -26,12 +34,23 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _workbook.Sheets.CollectionChanged += WorkbookSheets_CollectionChanged;
+        foreach(WorksheetSession existingSheet in _workbook.Sheets) existingSheet.Changed+=Worksheet_Changed;
+        _recoveryDebounceTimer.Tick += (_, _) =>
+        {
+            _recoveryDebounceTimer.Stop();
+            SaveRecoverySnapshot();
+        };
         _headerSelectionTimer.Tick += (_, _) =>
         {
             _headerSelectionTimer.Stop();
             UpdateHeaderSelection();
+            RefreshSelectionStats();
         };
         SheetGrid.AddHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(SheetGrid_ColumnResizeCompleted));
+        SheetGrid.AddHandler(Control.MouseDoubleClickEvent, new MouseButtonEventHandler(SheetGrid_ColumnAutoFit), true);
+        _recoveryTimer.Tick += (_, _) => SaveRecoverySnapshot();
+        _recoveryTimer.Start();
         InitializeFormattingControls();
         ThemeBox.ItemsSource = SheetTheme.Presets; ThemeBox.DisplayMemberPath = nameof(SheetTheme.Name);
         ChartKindBox.ItemsSource = Enum.GetValues<ChartKind>(); ChartKindBox.SelectedIndex = 1;
@@ -44,6 +63,8 @@ public partial class MainWindow : Window
             BindSheet(sheet);
         }
 
+        Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
     }
 
@@ -120,6 +141,7 @@ public partial class MainWindow : Window
 
     private void NewSheet_Click(object sender, RoutedEventArgs e)
     {
+        if (!ConfirmContinueWithUnsavedChanges("create another worksheet")) return;
         WorksheetSession sheet = _workbook.AddSheet();
         SheetList.SelectedItem = sheet;
         SetStatus($"created · {sheet.Name}");
@@ -127,6 +149,7 @@ public partial class MainWindow : Window
 
     private void OpenCsv_Click(object sender, RoutedEventArgs e)
     {
+        if (!ConfirmContinueWithUnsavedChanges("open a CSV worksheet")) return;
         OpenFileDialog dialog = new()
         {
             Title = "Open CSV",
@@ -146,6 +169,7 @@ public partial class MainWindow : Window
         {
             if (sheet.LoadCsv(dialog.FileName, out string message))
             {
+                sheet.MarkDirty();
                 SetStatus(message);
                 RefreshEngineText();
             }
@@ -189,7 +213,8 @@ public partial class MainWindow : Window
         try
         {
             sheet.SaveCsv(dialog.FileName);
-            SetStatus($"saved · {dialog.FileName}");
+            if(sheet.CsvCapturesEntireSheet) { sheet.MarkSaved(); SetStatus($"saved · {dialog.FileName}"); }
+            else SetStatus($"saved cell values only · presentation remains unsaved · {dialog.FileName}");
         }
         catch (IOException ex)
         {
@@ -209,6 +234,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        bool otherSheets = _workbook.Sheets.Count > 1;
+        if (otherSheets)
+        {
+            if(MessageBox.Show(this,"Only the active sheet will be saved in this XLSX. Other tabs will not be included. Continue?",
+                "Single-sheet export",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes) return;
+            SetStatus("Only the active sheet will be exported; other tabs are not included.");
+        }
+
         SaveFileDialog dialog = new()
         {
             Title = "Export XLSX",
@@ -225,7 +258,8 @@ public partial class MainWindow : Window
 
         if (sheet.ExportXlsx(dialog.FileName, out string message))
         {
-            SetStatus(message);
+            sheet.MarkSaved();
+            SetStatus(otherSheets ? message + " · only active sheet exported" : message);
         }
         else
         {
@@ -504,10 +538,47 @@ public partial class MainWindow : Window
 
     private void SheetGrid_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.V)
+        bool control = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        if (Keyboard.FocusedElement is TextBox && e.Key is not (Key.Enter or Key.Tab)) return;
+
+        if (control && e.Key == Key.C)
+        {
+            e.Handled = true;
+            CopySelection();
+            return;
+        }
+
+        if (control && e.Key == Key.V)
         {
             e.Handled = true;
             PasteClipboard();
+            return;
+        }
+
+        if (control && e.Key is Key.D or Key.R)
+        {
+            e.Handled = true;
+            FillSelection(down: e.Key == Key.D);
+            return;
+        }
+
+        if (e.Key == Key.F2)
+        {
+            e.Handled = true;
+            if (SheetGrid.BeginEdit())
+                Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+                {
+                    if (TryCurrentCoordinate(out int row, out int column) &&
+                        SheetGrid.CurrentItem is DataRowView item &&
+                        SheetGrid.Columns.Count > column)
+                    {
+                        DataGridCell? cell=VisualsForRow(item).FirstOrDefault(c=>c.Column.DisplayIndex==column);
+                        TextBox? editor=cell is null?null:FindVisualChildren<TextBox>(cell).FirstOrDefault();
+                        editor?.Focus();
+                        editor?.SelectAll();
+                    }
+                }));
             return;
         }
 
@@ -515,7 +586,99 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             ClearSelectedCells();
+            return;
         }
+
+        if (e.Key is Key.Enter or Key.Tab)
+        {
+            if (!TryCurrentCoordinate(out int row,out int column)) return;
+            e.Handled=true;
+            SheetGrid.CommitEdit(DataGridEditingUnit.Cell,true);
+            SheetGrid.CommitEdit(DataGridEditingUnit.Row,true);
+            int nextRow=row,nextColumn=column;
+            if(e.Key==Key.Enter) nextRow+=shift?-1:1;
+            else
+            {
+                nextColumn+=shift?-1:1;
+                if(nextColumn<0) { nextColumn=SheetGrid.Columns.Count-1; --nextRow; }
+                else if(nextColumn>=SheetGrid.Columns.Count) { nextColumn=0; ++nextRow; }
+            }
+            if(nextRow>=0 && nextRow<CurrentSheet!.Grid.Rows.Count)
+                Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>NavigateTo(nextRow,nextColumn)));
+            return;
+        }
+
+        if (e.Key is Key.Home or Key.End ||
+            (control && e.Key is Key.Left or Key.Right or Key.Up or Key.Down))
+        {
+            if (!TryCurrentCoordinate(out int row,out int column) || CurrentSheet is not WorksheetSession sheet) return;
+            if(control)
+            {
+                if(e.Key==Key.Home) { row=0; column=0; }
+                else if(e.Key==Key.End) FindLastPopulatedCell(sheet,out row,out column);
+                else MoveToDataEdge(sheet,ref row,ref column,e.Key);
+            }
+            else if(e.Key==Key.Home) column=0;
+            else column=SheetGrid.Columns.Count-1;
+            e.Handled=true;
+            NavigateTo(row,column);
+        }
+    }
+
+    private IEnumerable<DataGridCell> VisualsForRow(DataRowView item) =>
+        FindVisualChildren<DataGridCell>(SheetGrid).Where(cell=>ReferenceEquals(cell.DataContext,item));
+
+    private void CopySelection()
+    {
+        if(CurrentSheet is not WorksheetSession sheet || !SelectedRange(out CellRange range)) return;
+        string text=string.Join("\r\n",Enumerable.Range(range.StartRow,range.EndRow-range.StartRow+1)
+            .Select(row=>string.Join("\t",Enumerable.Range(range.StartColumn,range.EndColumn-range.StartColumn+1)
+                .Select(column=>sheet.GetInput(row,column)))));
+        try { Clipboard.SetText(text); SetStatus($"copied · {range}"); }
+        catch(System.Runtime.InteropServices.ExternalException ex) { ShowEditError($"clipboard unavailable · {ex.Message}"); }
+    }
+
+    private void FillSelection(bool down)
+    {
+        if(CurrentSheet is not WorksheetSession sheet || !SelectedRange(out CellRange range)) return;
+        int changed=0;
+        int rowStart=down?range.StartRow+1:range.StartRow;
+        int columnStart=down?range.StartColumn:range.StartColumn+1;
+        string? error=null;
+        for(int row=rowStart;row<=range.EndRow;++row)
+        for(int column=columnStart;column<=range.EndColumn;++column)
+        {
+            string value=down?sheet.GetInput(range.StartRow,column):sheet.GetInput(row,range.StartColumn);
+            if(sheet.CommitCell(row,column,value,out string message)) ++changed;
+            else error=$"cell {CellName(row,column)} · {message}";
+        }
+        if(error is not null) ShowEditError(error); else ClearEditError();
+        SetStatus($"filled {changed:N0} cells · {(down?"down":"right")}");
+        RefreshEngineText(); SheetGrid.Items.Refresh(); RefreshRealizedCellStyles();
+    }
+
+    private void MoveToDataEdge(WorksheetSession sheet,ref int row,ref int column,Key key)
+    {
+        int rowStep=key==Key.Up?-1:key==Key.Down?1:0;
+        int columnStep=key==Key.Left?-1:key==Key.Right?1:0;
+        bool occupied=sheet.GetInput(row,column).Length!=0;
+        while(true)
+        {
+            int nextRow=row+rowStep,nextColumn=column+columnStep;
+            if(nextRow<0 || nextRow>=sheet.Grid.Rows.Count || nextColumn<0 || nextColumn>=sheet.Grid.Columns.Count) return;
+            bool nextOccupied=sheet.GetInput(nextRow,nextColumn).Length!=0;
+            if(occupied && !nextOccupied) return;
+            row=nextRow; column=nextColumn;
+            if(!occupied && nextOccupied) return;
+        }
+    }
+
+    private static void FindLastPopulatedCell(WorksheetSession sheet,out int row,out int column)
+    {
+        row=0; column=0;
+        for(int r=0;r<sheet.Grid.Rows.Count;++r)
+        for(int c=0;c<sheet.Grid.Columns.Count;++c)
+            if(sheet.GetInput(r,c).Length!=0) { row=r; column=c; }
     }
 
     private void PasteClipboard()
@@ -536,6 +699,7 @@ public partial class MainWindow : Window
 
         int written = 0;
         string lastMessage = string.Empty;
+        string? error=null;
 
         for (int rowOffset = 0; rowOffset < lines.Length; rowOffset++)
         {
@@ -552,15 +716,17 @@ public partial class MainWindow : Window
 
                 if (row >= sheet.Grid.Rows.Count || column >= sheet.Grid.Columns.Count)
                 {
+                    error="paste exceeds worksheet bounds";
                     continue;
                 }
 
-                sheet.CommitCell(row, column, cells[columnOffset], out lastMessage);
-                written++;
+                if(sheet.CommitCell(row, column, cells[columnOffset], out lastMessage)) written++;
+                else error=$"cell {CellName(row,column)} · {lastMessage}";
             }
         }
 
-        SetStatus($"pasted {written:N0} cells · {lastMessage}");
+        if(error is null) ClearEditError(); else ShowEditError(error);
+        SetStatus(error is null?$"pasted {written:N0} cells · {lastMessage}":$"pasted {written:N0} cells · {error}");
         RefreshEngineText();
         SheetGrid.Items.Refresh();
         UpdateFormulaBar();
@@ -593,11 +759,14 @@ public partial class MainWindow : Window
         }
 
         string lastMessage = string.Empty;
+        string? error=null;
         foreach ((int row, int column) in cells.Distinct())
         {
-            sheet.CommitCell(row, column, string.Empty, out lastMessage);
+            if(!sheet.CommitCell(row, column, string.Empty, out lastMessage))
+                error=$"cell {CellName(row,column)} · {lastMessage}";
         }
 
+        if(error is null) ClearEditError(); else ShowEditError(error);
         SetStatus($"cleared {cells.Distinct().Count():N0} cells · {lastMessage}");
         RefreshEngineText();
         SheetGrid.Items.Refresh();
@@ -763,6 +932,51 @@ public partial class MainWindow : Window
         }
     }
 
+    private void NameBox_KeyDown(object sender,KeyEventArgs e)
+    {
+        if(e.Key!=Key.Enter) return;
+        e.Handled=true;
+        if(!TryParseCellName(NameBox.Text,out int row,out int column) ||
+            CurrentSheet is not WorksheetSession sheet || row>=sheet.Grid.Rows.Count || column>=sheet.Grid.Columns.Count)
+        { ShowEditError("Name Box address is outside this worksheet"); return; }
+        ClearEditError();
+        NavigateTo(row,column);
+    }
+
+    private static bool TryParseCellName(string text,out int row,out int column)
+    {
+        row=-1; column=-1;
+        string address=text.Trim().ToUpperInvariant();
+        int i=0;
+        long columnNumber=0;
+        while(i<address.Length && address[i] is >= 'A' and <= 'Z')
+        {
+            columnNumber=columnNumber*26+(address[i]-'A'+1);
+            if(columnNumber>int.MaxValue) return false;
+            ++i;
+        }
+        if(i==0 || i==address.Length || !int.TryParse(address[i..],NumberStyles.None,CultureInfo.InvariantCulture,out int oneBasedRow) ||
+            oneBasedRow<1) return false;
+        row=oneBasedRow-1; column=(int)columnNumber-1;
+        return true;
+    }
+
+    private void NavigateTo(int row,int column)
+    {
+        if(CurrentSheet is not WorksheetSession sheet || row<0 || row>=sheet.Grid.Rows.Count ||
+            column<0 || column>=sheet.Grid.Columns.Count || column>=SheetGrid.Columns.Count) return;
+        DataRowView? item=SheetGrid.Items.Cast<object>().OfType<DataRowView>()
+            .FirstOrDefault(view=>ReferenceEquals(view.Row,sheet.Grid.Rows[row]));
+        if(item is null) return;
+        SheetGrid.SelectedCells.Clear();
+        SheetGrid.CurrentCell=new DataGridCellInfo(item,SheetGrid.Columns[column]);
+        SheetGrid.SelectedCells.Add(SheetGrid.CurrentCell);
+        SheetGrid.ScrollIntoView(item,SheetGrid.Columns[column]);
+        SheetGrid.Focus();
+        NameBox.Text=CellName(row,column);
+        FormulaBox.Text=sheet.GetInput(row,column);
+    }
+
     private bool TryCurrentCoordinate(out int row, out int column)
     {
         row = -1;
@@ -792,6 +1006,22 @@ public partial class MainWindow : Window
         UpdateErrorBanner();
     }
 
+    private void RefreshSelectionStats()
+    {
+        if(CurrentSheet is not WorksheetSession sheet) { SelectionStatsText.Text=string.Empty; return; }
+        List<(int Row,int Column)> cells=SelectedCoordinates();
+        double sum=0;
+        int count=0;
+        foreach((int row,int column) in cells)
+        {
+            if(!sheet.TryNumber(row,column,out var value)) continue;
+            sum+=(double)value.Numerator/value.Denominator;
+            ++count;
+        }
+        string average=count==0?"—":(sum/count).ToString("G6",CultureInfo.InvariantCulture);
+        SelectionStatsText.Text=$"Sum {sum.ToString("G6",CultureInfo.InvariantCulture)} · Average {average} · Count {count:N0}";
+    }
+
     private void UpdateEngineCommandState()
     {
         bool available = CurrentSheet?.EngineAvailable == true;
@@ -802,6 +1032,12 @@ public partial class MainWindow : Window
         TableTotalsButton.IsEnabled = available;
         AddChartButton.IsEnabled = available;
         ViewChartsButton.IsEnabled = available;
+        InsertRowButton.IsEnabled = available;
+        DeleteRowButton.IsEnabled = available;
+        InsertColumnButton.IsEnabled = available;
+        DeleteColumnButton.IsEnabled = available;
+        SortAscendingButton.IsEnabled = available;
+        SortDescendingButton.IsEnabled = available;
     }
 
     private void UpdateErrorBanner()
@@ -830,9 +1066,182 @@ public partial class MainWindow : Window
         _headerSelectionTimer.Start();
     }
 
+    private void WorkbookSheets_CollectionChanged(object? sender,NotifyCollectionChangedEventArgs e)
+    {
+        if(e.OldItems is not null)
+            foreach(WorksheetSession sheet in e.OldItems) sheet.Changed-=Worksheet_Changed;
+        if(e.NewItems is not null)
+            foreach(WorksheetSession sheet in e.NewItems) sheet.Changed+=Worksheet_Changed;
+        ScheduleRecoverySave();
+    }
+
+    private void Worksheet_Changed(object? sender,EventArgs e)=>ScheduleRecoverySave();
+
+    private void ScheduleRecoverySave()
+    {
+        if(!_workbook.HasUnsavedChanges)
+        {
+            _recoveryDebounceTimer.Stop();
+            DeleteRecoverySnapshot();
+            return;
+        }
+        _recoveryDebounceTimer.Stop();
+        _recoveryDebounceTimer.Start();
+    }
+
     private void SetStatus(string message)
     {
         StatusText.Text = string.IsNullOrWhiteSpace(message) ? "Ready" : message;
+    }
+
+    private string RecoveryRoot
+    {
+        get
+        {
+            string? configured=Environment.GetEnvironmentVariable("KHZ_RECOVERY_DIRECTORY");
+            return string.IsNullOrWhiteSpace(configured)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"KHZ Sheet","recovery")
+                : Path.GetFullPath(configured);
+        }
+    }
+
+    private void MainWindow_Loaded(object sender,RoutedEventArgs e)
+    {
+        if(Environment.GetEnvironmentVariable("KHZ_TEST_ARTIFACTS") is not null) return;
+        string manifestPath=Path.Combine(RecoveryRoot,"recovery.json");
+        if(!File.Exists(manifestPath)) return;
+        if(MessageBox.Show(this,"A recovery copy from an earlier session is available. Restore it?",
+            "Recover worksheet",MessageBoxButton.YesNo,MessageBoxImage.Warning)==MessageBoxResult.Yes)
+            RestoreRecoverySnapshot();
+        else
+            DeleteRecoverySnapshot();
+    }
+
+    private bool SaveRecoverySnapshot()
+    {
+        if(!_workbook.HasUnsavedChanges) return true;
+        string root=RecoveryRoot;
+        string generation=Guid.NewGuid().ToString("N");
+        string staging=Path.Combine(root,"."+generation+".tmp");
+        string final=Path.Combine(root,generation);
+        try
+        {
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(staging);
+            RecoveryEntry[] entries=_workbook.Sheets.Select((sheet,index)=>
+            {
+                string extension=sheet.EngineAvailable?".xlsx":".csv";
+                string fileName=$"sheet-{index+1:D3}{extension}";
+                string path=Path.Combine(staging,fileName);
+                if(extension==".xlsx")
+                {
+                    if(!sheet.ExportXlsx(path,out string message)) throw new IOException(message);
+                }
+                else sheet.SaveCsv(path);
+                return new RecoveryEntry(sheet.Name,fileName);
+            }).ToArray();
+            Directory.Move(staging,final);
+            RecoveryManifest manifest=new(1,generation,entries);
+            string manifestTemp=Path.Combine(root,"recovery.json.tmp");
+            File.WriteAllText(manifestTemp,JsonSerializer.Serialize(manifest));
+            File.Move(manifestTemp,Path.Combine(root,"recovery.json"),overwrite:true);
+            foreach(string old in Directory.GetDirectories(root))
+                if(!string.Equals(old,final,StringComparison.OrdinalIgnoreCase) && !old.EndsWith(".tmp",StringComparison.OrdinalIgnoreCase))
+                    Directory.Delete(old,true);
+            return true;
+        }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            try { if(Directory.Exists(staging)) Directory.Delete(staging,true); } catch(IOException) { }
+            ShowEditError($"recovery autosave failed · {ex.Message}");
+            SetStatus($"recovery autosave failed · {ex.Message}");
+            return false;
+        }
+    }
+
+    private void RestoreRecoverySnapshot()
+    {
+        List<WorksheetSession> recovered=new();
+        try
+        {
+            if(CurrentSheet?.EngineAvailable!=true) throw new InvalidOperationException(CurrentSheet?.EngineLoadError ?? "native engine unavailable");
+            RecoveryManifest? manifest=JsonSerializer.Deserialize<RecoveryManifest>(File.ReadAllText(Path.Combine(RecoveryRoot,"recovery.json")));
+            if(manifest is null || manifest.Version!=1 || !Guid.TryParseExact(manifest.Generation,"N",out _) ||
+                manifest.Sheets is null || manifest.Sheets.Length==0) throw new InvalidDataException("recovery manifest is invalid");
+            string generation=Path.Combine(RecoveryRoot,manifest.Generation);
+            foreach(RecoveryEntry entry in manifest.Sheets)
+            {
+                if(entry.Name is null || entry.FileName is null || entry.FileName!=Path.GetFileName(entry.FileName) ||
+                    Path.GetExtension(entry.FileName) is not (".xlsx" or ".csv"))
+                    throw new InvalidDataException("recovery file name is invalid");
+                WorksheetSession sheet=new(entry.Name);
+                string recoveryPath=Path.Combine(generation,entry.FileName);
+                bool loaded=Path.GetExtension(entry.FileName)==".xlsx"
+                    ? sheet.LoadXlsx(recoveryPath,out string message)
+                    : sheet.LoadCsv(recoveryPath,out message);
+                if(!loaded)
+                { sheet.Dispose(); throw new InvalidDataException(message); }
+                sheet.MarkDirty();
+                recovered.Add(sheet);
+            }
+            foreach(WorksheetSession existing in _workbook.Sheets) existing.Dispose();
+            _workbook.Sheets.Clear();
+            foreach(WorksheetSession sheet in recovered) _workbook.Sheets.Add(sheet);
+            SheetList.SelectedItem=recovered[0];
+            SetStatus($"recovered {recovered.Count:N0} worksheet(s) · save to a workbook file");
+        }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or InvalidOperationException)
+        {
+            foreach(WorksheetSession sheet in recovered) sheet.Dispose();
+            ShowEditError($"recovery restore failed · {ex.Message}");
+            SetStatus($"recovery restore failed · {ex.Message}");
+        }
+    }
+
+    private void DeleteRecoverySnapshot()
+    {
+        try
+        {
+            string root=RecoveryRoot;
+            string manifestPath=Path.Combine(root,"recovery.json");
+            if(File.Exists(manifestPath))
+            {
+                RecoveryManifest? manifest=JsonSerializer.Deserialize<RecoveryManifest>(File.ReadAllText(manifestPath));
+                if(manifest is not null && Guid.TryParseExact(manifest.Generation,"N",out _))
+                {
+                    string generation=Path.Combine(root,manifest.Generation);
+                    if(Directory.Exists(generation)) Directory.Delete(generation,true);
+                }
+                File.Delete(manifestPath);
+            }
+            string tempManifest=Path.Combine(root,"recovery.json.tmp");
+            if(File.Exists(tempManifest)) File.Delete(tempManifest);
+        }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or JsonException)
+        { ShowEditError($"recovery cleanup failed · {ex.Message}"); }
+    }
+
+    private bool ConfirmContinueWithUnsavedChanges(string action)
+    {
+        if(!_workbook.HasUnsavedChanges) return true;
+        if(MessageBox.Show(this,$"There are unsaved changes. A recovery copy will be written before you {action}. Continue?",
+            "Unsaved changes",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes) return false;
+        return SaveRecoverySnapshot();
+    }
+
+    private void MainWindow_Closing(object? sender,System.ComponentModel.CancelEventArgs e)
+    {
+        if(!_workbook.HasUnsavedChanges) { DeleteRecoverySnapshot(); return; }
+        if(Environment.GetEnvironmentVariable("KHZ_TEST_ARTIFACTS") is not null)
+        {
+            SaveRecoverySnapshot();
+            return;
+        }
+        MessageBoxResult answer=MessageBox.Show(this,"Save a crash-recovery copy before closing? Choose No to discard unsaved changes.",
+            "Unsaved changes",MessageBoxButton.YesNoCancel,MessageBoxImage.Warning);
+        if(answer==MessageBoxResult.Cancel) { e.Cancel=true; return; }
+        if(answer==MessageBoxResult.Yes && !SaveRecoverySnapshot()) { e.Cancel=true; return; }
+        if(answer==MessageBoxResult.No) DeleteRecoverySnapshot();
     }
 
     private static string SafeFileName(string name)
@@ -844,6 +1253,9 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _recoveryTimer.Stop();
+        _recoveryDebounceTimer.Stop();
+        _headerSelectionTimer.Stop();
         _workbook.Dispose();
     }
 }

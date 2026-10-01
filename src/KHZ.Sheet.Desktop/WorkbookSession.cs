@@ -14,10 +14,11 @@ public sealed class WorkbookSession : IDisposable
     public WorkbookSession()
     {
         Sheets = new ObservableCollection<WorksheetSession>();
-        AddSheet();
+        AddSheet().MarkSaved();
     }
 
     public ObservableCollection<WorksheetSession> Sheets { get; }
+    public bool HasUnsavedChanges => Sheets.Any(sheet => sheet.IsDirty);
 
     public WorksheetSession AddSheet(string? requestedName = null)
     {
@@ -26,6 +27,7 @@ public sealed class WorkbookSession : IDisposable
             : MakeUniqueName(requestedName.Trim());
 
         WorksheetSession sheet = new(name);
+        sheet.MarkDirty();
         Sheets.Add(sheet);
         return sheet;
     }
@@ -44,18 +46,63 @@ public sealed class WorkbookSession : IDisposable
 
     private string MakeUniqueName(string requested)
     {
+        requested = requested.Length > 31 ? requested[..31] : requested;
         if (!Sheets.Any(s => string.Equals(s.Name, requested, StringComparison.OrdinalIgnoreCase)))
         {
             return requested;
         }
 
         int suffix = 2;
-        while (Sheets.Any(s => string.Equals(s.Name, $"{requested} {suffix}", StringComparison.OrdinalIgnoreCase)))
+        while (true)
         {
-            suffix++;
+            string suffixText=$" {suffix++}";
+            string candidate=requested[..Math.Min(requested.Length,31-suffixText.Length)]+suffixText;
+            if(!Sheets.Any(s=>string.Equals(s.Name,candidate,StringComparison.OrdinalIgnoreCase))) return candidate;
         }
+    }
 
-        return $"{requested} {suffix}";
+    public bool TryRenameSheet(WorksheetSession sheet, string? requestedName, out string message)
+    {
+        string name = requestedName?.Trim() ?? string.Empty;
+        if (!Sheets.Contains(sheet)) { message = "worksheet not found"; return false; }
+        if (name.Length is < 1 or > 31 || name.IndexOfAny([':', '\\', '/', '?', '*', '[', ']']) >= 0)
+        { message = "sheet names must be 1–31 characters and cannot contain : \\ / ? * [ ]"; return false; }
+        if (Sheets.Any(other => !ReferenceEquals(other, sheet) &&
+            string.Equals(other.Name, name, StringComparison.OrdinalIgnoreCase)))
+        { message = "a sheet with that name already exists"; return false; }
+        sheet.Rename(name);
+        message = $"renamed · {name}";
+        return true;
+    }
+
+    public bool RemoveSheet(WorksheetSession sheet, out string message)
+    {
+        if (Sheets.Count <= 1) { message = "a workbook must keep at least one sheet"; return false; }
+        if (!Sheets.Remove(sheet)) { message = "worksheet not found"; return false; }
+        sheet.Dispose();
+        Sheets[0].MarkDirty();
+        message = $"deleted · {sheet.Name}";
+        return true;
+    }
+
+    public bool MoveSheet(WorksheetSession sheet, int newIndex, out string message)
+    {
+        int currentIndex = Sheets.IndexOf(sheet);
+        if (currentIndex < 0 || newIndex < 0 || newIndex >= Sheets.Count)
+        { message = "sheet order is out of range"; return false; }
+        Sheets.Move(currentIndex, newIndex);
+        sheet.MarkDirty();
+        message = "sheet order updated";
+        return true;
+    }
+
+    public WorksheetSession? DuplicateSheet(WorksheetSession source, out string message)
+    {
+        if (!Sheets.Contains(source)) { message = "worksheet not found"; return null; }
+        string name = MakeUniqueName((source.Name.Length>26?source.Name[..26]:source.Name)+" Copy");
+        WorksheetSession? copy = source.CreateCopy(name, out message);
+        if (copy is not null) { copy.MarkDirty(); Sheets.Add(copy); }
+        return copy;
     }
 
     public void Dispose()
@@ -109,6 +156,8 @@ public sealed partial class WorksheetSession : IDisposable
         try
         {
             EngineStatus = NativeSheet.TryCreate(ArenaBytes, CellCapacity, out _native);
+            if (!EngineAvailable)
+                EngineLoadError = $"Native calculation engine unavailable ({SheetStatusText.Name(EngineStatus)}). Verify khz_sheet.dll, its VC++ runtime, and process architecture.";
         }
         catch (DllNotFoundException ex)
         {
@@ -127,7 +176,28 @@ public sealed partial class WorksheetSession : IDisposable
         }
     }
 
-    public string Name { get; }
+    public string Name { get; private set; }
+
+    public bool IsDirty { get; private set; }
+    public event EventHandler? Changed;
+
+    internal void Rename(string name)
+    {
+        Name = name;
+        MarkDirty();
+    }
+
+    internal void MarkDirty()
+    {
+        IsDirty = true;
+        Changed?.Invoke(this,EventArgs.Empty);
+    }
+
+    internal void MarkSaved()
+    {
+        IsDirty = false;
+        Changed?.Invoke(this,EventArgs.Empty);
+    }
 
     public DataTable Grid { get; }
 
@@ -169,6 +239,7 @@ public sealed partial class WorksheetSession : IDisposable
         if (!ValidateTableEdit(row, column, after, out message)) return false;
         bool ok = CommitCellCore(row, column, after, out message);
         if (ok) UpdateTableHeaders(row);
+        if (ok && !string.Equals(before, after, StringComparison.Ordinal)) MarkDirty();
         if (ok && !string.Equals(before, after, StringComparison.Ordinal))
         {
             _undo.Push(new CellEdit(row, column, before, after));
@@ -265,6 +336,7 @@ public sealed partial class WorksheetSession : IDisposable
         }
 
         _redo.Push(edit);
+        MarkDirty();
         return true;
     }
 
@@ -284,6 +356,7 @@ public sealed partial class WorksheetSession : IDisposable
         }
 
         _undo.Push(edit);
+        MarkDirty();
         return true;
     }
 
@@ -333,6 +406,7 @@ public sealed partial class WorksheetSession : IDisposable
         if (changes.Count == 0) { message = "format unchanged"; return false; }
         _undo.Push(new FormatEdit(changes));
         _redo.Clear();
+        MarkDirty();
         message = $"formatted {changes.Count:N0} cells";
         return true;
     }
@@ -349,6 +423,7 @@ public sealed partial class WorksheetSession : IDisposable
         if (changes.Count == 0) { message = "no explicit formatting"; return false; }
         _undo.Push(new FormatEdit(changes));
         _redo.Clear();
+        MarkDirty();
         message = $"cleared format · {changes.Count:N0} cells";
         return true;
     }
@@ -361,6 +436,7 @@ public sealed partial class WorksheetSession : IDisposable
         _tableFormats.Add(table);
         _undo.Push(new TableEdit(table));
         _redo.Clear();
+        MarkDirty();
         message = $"table style · {ColumnName(range.StartColumn)}{range.StartRow + 1}:{ColumnName(range.EndColumn)}{range.EndRow + 1}";
         return true;
     }
@@ -674,6 +750,7 @@ public sealed partial class WorksheetSession : IDisposable
         }
 
         message = $"csv · {imported:N0} populated cells";
+        MarkSaved();
         return true;
     }
 

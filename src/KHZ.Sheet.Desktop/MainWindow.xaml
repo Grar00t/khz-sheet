@@ -73,7 +73,8 @@
                 <Button Content="Open XLSX" Click="OpenXlsx_Click"/>
                 <Button Content="Open CSV" Click="OpenCsv_Click"/>
                 <Button Content="Save CSV" Click="SaveCsv_Click"/>
-                <Button x:Name="ExportXlsxButton" Content="Export XLSX" Click="ExportXlsx_Click"/>
+                <Button x:Name="ExportXlsxButton" Content="Export XLSX" Click="ExportXlsx_Click"
+                        ToolTip="Exports the active sheet only; other tabs are not included"/>
                 <Separator Width="12" Opacity="0"/>
                 <Button Content="Undo" Click="Undo_Click" ToolTip="Ctrl+Z"/>
                 <Button Content="Redo" Click="Redo_Click" ToolTip="Ctrl+Y"/>
@@ -111,8 +112,8 @@
                 <Button Content="Table Style" Click="TableStyle_Click"/>
                 <Button Content="Create Table" Click="CreateTable_Click"/>
                 <Button x:Name="TableTotalsButton" Content="Table + Totals" Click="CreateTableTotals_Click" ToolTip="Create a table and add an exact SUM row below the selected data"/>
-                <Button Content="Sort ↑" Click="SortAscending_Click" ToolTip="Sort table view; row numbers remain native coordinates"/>
-                <Button Content="Sort ↓" Click="SortDescending_Click"/>
+                <Button x:Name="SortAscendingButton" Content="Sort ↑" Click="SortAscending_Click" ToolTip="Sort table view; row numbers remain native coordinates"/>
+                <Button x:Name="SortDescendingButton" Content="Sort ↓" Click="SortDescending_Click"/>
                 <Button Content="Original Order" Click="ResetSort_Click"/>
                 <ComboBox x:Name="ThemeBox" Width="165" SelectionChanged="ThemeBox_SelectionChanged" ToolTip="Worksheet theme"/>
                 <ComboBox x:Name="ChartKindBox" Width="85" ToolTip="Chart type"/>
@@ -120,6 +121,10 @@
                 <Button x:Name="ViewChartsButton" Content="Charts" Click="ViewCharts_Click"/>
                 <TextBox x:Name="RowHeightBox" Width="45" Text="24" ToolTip="Row height in points"/>
                 <Button Content="Row Height" Click="RowHeight_Click"/>
+                <Button x:Name="InsertRowButton" Content="Insert Row" Click="InsertRow_Click"/>
+                <Button x:Name="DeleteRowButton" Content="Delete Row" Click="DeleteRow_Click"/>
+                <Button x:Name="InsertColumnButton" Content="Insert Column" Click="InsertColumn_Click"/>
+                <Button x:Name="DeleteColumnButton" Content="Delete Column" Click="DeleteColumn_Click"/>
                 <Button Content="Clear Format" Click="ClearFormat_Click"/>
             </WrapPanel>
         </Border>
@@ -139,7 +144,7 @@
 
                 <TextBox x:Name="NameBox"
                          Grid.Column="0"
-                         IsReadOnly="True"
+                         KeyDown="NameBox_KeyDown"
                          Text="A1"
                          HorizontalContentAlignment="Center"
                          FontWeight="SemiBold"/>
@@ -216,6 +221,12 @@
                         Click="NewSheet_Click"
                         ToolTip="Add sheet"/>
 
+                <Button DockPanel.Dock="Right" Content="→" Width="32" Click="MoveSheetRight_Click" ToolTip="Move sheet right"/>
+                <Button DockPanel.Dock="Right" Content="←" Width="32" Click="MoveSheetLeft_Click" ToolTip="Move sheet left"/>
+                <Button DockPanel.Dock="Right" Content="Delete" Click="DeleteSheet_Click"/>
+                <Button DockPanel.Dock="Right" Content="Duplicate" Click="DuplicateSheet_Click"/>
+                <Button DockPanel.Dock="Right" Content="Rename" Click="RenameSheet_Click"/>
+
                 <ListBox x:Name="SheetList"
                          BorderThickness="0"
                          Background="Transparent"
@@ -278,6 +289,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <TextBlock x:Name="StatusText"
@@ -288,6 +300,11 @@
                            Grid.Column="1"
                            Foreground="{DynamicResource MutedTextBrush}"
                            Text="engine"/>
+
+                <TextBlock x:Name="SelectionStatsText"
+                           Grid.Column="2"
+                           Margin="16,0,0,0"
+                           Foreground="{DynamicResource MutedTextBrush}"/>
             </Grid>
         </Border>
     </Grid>

@@ -22,25 +22,54 @@ public sealed partial class WorksheetSession
     public int FrozenColumns { get; private set; }
     internal bool HasWorkbookObjects => Theme is not null || Tables.Count != 0 || Charts.Count != 0 ||
         ColumnWidths.Count != 0 || RowHeights.Count != 0 || FrozenColumns != 0;
+    internal bool CsvCapturesEntireSheet => _formats.Count==0 && _tableFormats.Count==0 && !HasWorkbookObjects;
     public bool SetColumnWidth(int column, double width)
     {
         if (column < 0 || column >= Grid.Columns.Count || !double.IsFinite(width) || width is < 1 or > 255) return false;
-        _columnWidths[column] = width; return true;
+        if (!_columnWidths.TryGetValue(column,out double previous) || previous!=width) { _columnWidths[column] = width; MarkDirty(); }
+        return true;
     }
     public bool SetRowHeight(int row, double height)
     {
         if (row < 0 || row >= Grid.Rows.Count || !double.IsFinite(height) || height is < 1 or > 409) return false;
-        _rowHeights[row] = height; return true;
+        if (!_rowHeights.TryGetValue(row,out double previous) || previous!=height) { _rowHeights[row] = height; MarkDirty(); }
+        return true;
     }
     public void SetTheme(SheetTheme theme)
     {
         if (!SheetTheme.Presets.Contains(theme)) throw new ArgumentException("Unknown theme", nameof(theme));
-        Theme = theme;
+        if (Theme != theme) { Theme = theme; MarkDirty(); }
     }
     public void SetFrozenColumns(int columns)
     {
         if (columns < 0 || columns >= Grid.Columns.Count) throw new ArgumentOutOfRangeException(nameof(columns));
-        FrozenColumns = columns;
+        if (FrozenColumns != columns) { FrozenColumns = columns; MarkDirty(); }
+    }
+
+    internal WorksheetSession? CreateCopy(string name,out string message)
+    {
+        if(!EngineAvailable) { message=EngineLoadError ?? EngineSummary; return null; }
+        WorksheetSession copy=new(name);
+        foreach(var pair in _inputs)
+        {
+            DecodeKey(pair.Key,out int row,out int column);
+            bool text=pair.Value.StartsWith('\'');
+            string input=text?pair.Value[1..]:pair.Value;
+            if(copy.ImportValue(row,column,input,text,out message)) continue;
+            copy.Dispose(); return null;
+        }
+        if(!copy.Recalculate(out message)) { copy.Dispose(); return null; }
+        foreach(var item in _formats) copy._formats.Add(item.Key,item.Value);
+        copy._tableFormats.AddRange(_tableFormats);
+        copy._tables.AddRange(_tables);
+        copy._charts.AddRange(_charts);
+        foreach(var item in _columnWidths) copy._columnWidths.Add(item.Key,item.Value);
+        foreach(var item in _rowHeights) copy._rowHeights.Add(item.Key,item.Value);
+        copy.Theme=Theme;
+        copy.FrozenColumns=FrozenColumns;
+        copy.MarkSaved();
+        message=$"duplicated · {name}";
+        return copy;
     }
     private sealed record ObjectEdit(TableDefinition? Table, ChartDefinition? Chart) : WorksheetEdit;
     private sealed record TableTotalsEdit(TableDefinition Table, IReadOnlyList<CellEdit> Cells) : WorksheetEdit;
@@ -101,6 +130,7 @@ public sealed partial class WorksheetSession
             var table = candidate.Tables.Single();
             AdoptValues(candidate); _tables.Add(table);
             _undo.Push(new TableTotalsEdit(table, edits)); _redo.Clear();
+            MarkDirty();
         }
         message = $"table {name} · exact SUM totals · undo as one action";
         return true;
@@ -140,6 +170,7 @@ public sealed partial class WorksheetSession
             }
         }
         _tables.Add(table); _undo.Push(new ObjectEdit(table,null)); _redo.Clear();
+        MarkDirty();
         message = $"table {name} · {range}"; return true;
     }
 
@@ -209,7 +240,7 @@ public sealed partial class WorksheetSession
         if(an) return ((BigInteger)x.Numerator*y.Denominator).CompareTo((BigInteger)y.Numerator*x.Denominator);
         return StringComparer.Ordinal.Compare(Grid.Rows[a][column]?.ToString(),Grid.Rows[b][column]?.ToString());
     }
-    private bool TryNumber(int row,int column,out KhzRational value)
+    internal bool TryNumber(int row,int column,out KhzRational value)
     {
         value=default;
         if (_native is null || _native.TryGetCell((uint)column,(uint)row,out var cell) != SheetStatus.Ok ||
@@ -226,6 +257,7 @@ public sealed partial class WorksheetSession
         ChartDefinition chart=new(Guid.NewGuid(),$"{kind} · {Name}",kind,categories,values);
         if(!chart.IsValid) return false;
         _charts.Add(chart); _undo.Push(new ObjectEdit(null,chart)); _redo.Clear();
+        MarkDirty();
         message=$"{kind} chart · {values.RowCount} points"; return true;
     }
     public IReadOnlyList<ChartPoint> SampleChart(ChartDefinition chart)
@@ -255,7 +287,7 @@ public sealed partial class WorksheetSession
         _rowHeights.Clear(); foreach(var item in candidate._rowHeights) _rowHeights.Add(item.Key,item.Value);
         Theme=candidate.Theme; FrozenColumns=candidate.FrozenColumns; EngineStatus=candidate.EngineStatus;
         foreach(DataRow row in Grid.Rows) foreach(DataColumn col in Grid.Columns) row[col]="";
-        _undo.Clear(); _redo.Clear(); RefreshComputedCells(); return true;
+        _undo.Clear(); _redo.Clear(); IsDirty=false; RefreshComputedCells(); return true;
     }
     internal bool ImportValue(int row,int column,string input,bool text,out string message)
     {

@@ -7,6 +7,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using KHZ.Sheet.Core;
 using CellRange = KHZ.Sheet.Desktop.CellRange;
@@ -17,6 +18,7 @@ public partial class MainWindow
 {
     private async void OpenXlsx_Click(object sender,RoutedEventArgs e)
     {
+        if(!ConfirmContinueWithUnsavedChanges("open another worksheet")) return;
         OpenFileDialog dialog=new() {Title="Open XLSX",Filter="XLSX (*.xlsx)|*.xlsx",CheckFileExists=true};
         if(dialog.ShowDialog(this)!=true) return;
         IsEnabled=false; SetStatus("Reading and validating XLSX…");
@@ -27,9 +29,69 @@ public partial class MainWindow
                 bool ok=sheet.LoadXlsx(dialog.FileName,out string message); return (sheet,ok,message);
             });
             candidate=result.sheet;
-            if(result.ok) { _workbook.Sheets.Add(candidate); SheetList.SelectedItem=candidate; candidate=null; }
+            if(result.ok) { candidate.MarkDirty(); _workbook.Sheets.Add(candidate); SheetList.SelectedItem=candidate; candidate=null; }
             SetStatus(result.message);
         } finally { candidate?.Dispose(); IsEnabled=true; }
+    }
+
+    private void RenameSheet_Click(object sender,RoutedEventArgs e)
+    {
+        if(CurrentSheet is not WorksheetSession sheet) return;
+        string? name=PromptSheetName(sheet.Name);
+        if(name is null) return;
+        bool ok=_workbook.TryRenameSheet(sheet,name,out string message);
+        SetStatus(message);
+        if(!ok) ShowEditError(message);
+    }
+
+    private void DuplicateSheet_Click(object sender,RoutedEventArgs e)
+    {
+        if(CurrentSheet is not WorksheetSession sheet) return;
+        WorksheetSession? copy=_workbook.DuplicateSheet(sheet,out string message);
+        if(copy is null) { SetStatus(message); ShowEditError(message); return; }
+        SheetList.SelectedItem=copy;
+        SetStatus(message);
+    }
+
+    private void DeleteSheet_Click(object sender,RoutedEventArgs e)
+    {
+        if(CurrentSheet is not WorksheetSession sheet) return;
+        if(MessageBox.Show(this,$"Delete sheet '{sheet.Name}'? This cannot be undone.",
+            "Delete worksheet",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes) return;
+        if(sheet.IsDirty && MessageBox.Show(this,"This sheet has unsaved changes. Delete it without saving?",
+            "Unsaved worksheet",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes) return;
+        int oldIndex=SheetList.SelectedIndex;
+        if(!_workbook.RemoveSheet(sheet,out string message)) { SetStatus(message); return; }
+        SheetList.SelectedIndex=Math.Min(oldIndex,SheetList.Items.Count-1);
+        SetStatus(message);
+    }
+
+    private void MoveSheetLeft_Click(object sender,RoutedEventArgs e)=>MoveCurrentSheet(-1);
+    private void MoveSheetRight_Click(object sender,RoutedEventArgs e)=>MoveCurrentSheet(1);
+
+    private void MoveCurrentSheet(int offset)
+    {
+        if(CurrentSheet is not WorksheetSession sheet) return;
+        int target=SheetList.SelectedIndex+offset;
+        if(_workbook.MoveSheet(sheet,target,out string message)) SheetList.SelectedIndex=target;
+        SetStatus(message);
+    }
+
+    private string? PromptSheetName(string currentName)
+    {
+        TextBox input=new() {Text=currentName,MinWidth=260,Margin=new Thickness(0,0,0,10)};
+        Button accept=new() {Content="Rename",IsDefault=true,MinWidth=80,Margin=new Thickness(0,0,8,0)};
+        Button cancel=new() {Content="Cancel",IsCancel=true,MinWidth=80};
+        Window dialog=new() {Title="Rename worksheet",Owner=this,WindowStartupLocation=WindowStartupLocation.CenterOwner,
+            SizeToContent=SizeToContent.WidthAndHeight,ResizeMode=ResizeMode.NoResize};
+        StackPanel panel=new() {Margin=new Thickness(14)};
+        panel.Children.Add(input);
+        StackPanel buttons=new() {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};
+        buttons.Children.Add(accept); buttons.Children.Add(cancel); panel.Children.Add(buttons);
+        accept.Click+=(_,_)=>dialog.DialogResult=true;
+        dialog.Content=panel;
+        dialog.Loaded+=(_,_)=>{input.Focus();input.SelectAll();};
+        return dialog.ShowDialog()==true?input.Text:null;
     }
     private void ApplyThemeResources(SheetTheme? theme)
     {
@@ -135,12 +197,61 @@ public partial class MainWindow
             if(visual.Item is DataRowView item && sheet.RowHeights.TryGetValue(sheet.Grid.Rows.IndexOf(item.Row),out double h)) visual.Height=h*96/72;
         SetStatus("Row height stored in points");
     }
+
+    private void InsertRow_Click(object sender,RoutedEventArgs e)=>ChangeStructure(StructureAxis.Row,insert:true);
+    private void DeleteRow_Click(object sender,RoutedEventArgs e)=>ChangeStructure(StructureAxis.Row,insert:false);
+    private void InsertColumn_Click(object sender,RoutedEventArgs e)=>ChangeStructure(StructureAxis.Column,insert:true);
+    private void DeleteColumn_Click(object sender,RoutedEventArgs e)=>ChangeStructure(StructureAxis.Column,insert:false);
+
+    private enum StructureAxis { Row, Column }
+
+    private void ChangeStructure(StructureAxis axis,bool insert)
+    {
+        if(CurrentSheet is not WorksheetSession sheet || !TryCurrentCoordinate(out int row,out int column)) return;
+        int index=axis==StructureAxis.Row?row:column;
+        string noun=axis==StructureAxis.Row?"row":"column";
+        if(!insert && MessageBox.Show(this,$"Delete {noun} {index+1}? Cells and dependent references will be shifted.",
+            "Confirm deletion",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes) return;
+        string message;
+        bool ok=axis switch
+        {
+            StructureAxis.Row when insert=>sheet.InsertRow(index,out message),
+            StructureAxis.Row=>sheet.DeleteRow(index,out message),
+            StructureAxis.Column when insert=>sheet.InsertColumn(index,out message),
+            _=>sheet.DeleteColumn(index,out message)
+        };
+        if(!ok) { ShowEditError(message); SetStatus(message); return; }
+        _editError=null;
+        SheetGrid.ItemsSource=sheet.Grid.DefaultView;
+        SheetGrid.Items.Refresh();
+        RefreshCellStyles(sheet);
+        int nextRow=axis==StructureAxis.Row?(insert&&row>=index?row+1:!insert&&row>index?row-1:row):row;
+        int nextColumn=axis==StructureAxis.Column?(insert&&column>=index?column+1:!insert&&column>index?column-1:column):column;
+        if(!insert && (axis==StructureAxis.Row?row==index:column==index))
+        { nextRow=Math.Min(nextRow,sheet.Grid.Rows.Count-1); nextColumn=Math.Min(nextColumn,sheet.Grid.Columns.Count-1); }
+        NavigateTo(nextRow,nextColumn);
+        RefreshEngineText();
+        SetStatus($"{(insert?"inserted":"deleted")} {noun} · formulas adjusted; undo history cleared");
+    }
+
     private void SheetGrid_ColumnResizeCompleted(object sender,DragCompletedEventArgs e)
     {
         if(CurrentSheet is not WorksheetSession sheet ||
             FindVisualAncestor<DataGridColumnHeader>(e.OriginalSource as DependencyObject)?.Column is not { } column ||
             column.ActualWidth < 12) return;
         sheet.SetColumnWidth(column.DisplayIndex,(column.ActualWidth-5)/7);
+    }
+
+    private void SheetGrid_ColumnAutoFit(object sender,MouseButtonEventArgs e)
+    {
+        if(CurrentSheet is not WorksheetSession sheet ||
+            FindVisualAncestor<DataGridColumnHeader>(e.OriginalSource as DependencyObject)?.Column is not { } column) return;
+        column.Width=DataGridLength.SizeToCells;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>
+        {
+            if(column.ActualWidth>=12)
+                sheet.SetColumnWidth(column.DisplayIndex,Math.Clamp((column.ActualWidth-5)/7,1,255));
+        }));
     }
 
     private void UpdateHeaderSelection()

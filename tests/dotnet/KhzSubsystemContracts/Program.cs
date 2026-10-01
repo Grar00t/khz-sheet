@@ -66,6 +66,44 @@ internal static class Program
                 Check(unavailable.GetInput(0,0)=="","rejected unavailable-engine edits preserve input");
                 Check(unavailable.CommitCell(0,0,"plain text",out _) && unavailable.GetInput(0,0)=="plain text","unavailable engine permits text only");
             }
+            using(var workbook=new WorkbookSession()) {
+                WorksheetSession original=workbook.Sheets[0];
+                Check(original.CommitCell(0,0,"7/9",out _),"sheet management source value");
+                Check(workbook.TryRenameSheet(original,"Overview",out _) && original.Name=="Overview","sheet rename");
+                workbook.AddSheet("Details");
+                Check(!workbook.TryRenameSheet(original,"Details",out _) && original.Name=="Overview","duplicate sheet name refused");
+                original.ApplyFormat([(0,0)],new CellFormat(Bold:true),out _);
+                original.SetTheme(SheetTheme.Presets[1]);original.SetColumnWidth(0,18.5);
+                WorksheetSession? duplicate=workbook.DuplicateSheet(original,out _);
+                Check(duplicate is not null && duplicate.Name=="Overview Copy" && duplicate.GetInput(0,0)=="7/9" &&
+                    duplicate.GetEffectiveFormat(0,0).Bold==true && duplicate.Theme==original.Theme &&
+                    duplicate.ColumnWidths[0]==18.5,"duplicate copies cell and presentation state");
+                Check(duplicate is not null && workbook.MoveSheet(duplicate,0,out _) && ReferenceEquals(workbook.Sheets[0],duplicate),"sheet reorder");
+                Check(duplicate is not null && workbook.RemoveSheet(duplicate,out _) && workbook.Sheets.Count==2,"sheet delete");
+                Check(!workbook.RemoveSheet(original,out _) && workbook.Sheets.Count==2,"workbook cannot delete every sheet");
+            }
+            using(var structure=new WorksheetSession("Structure")) {
+                Edit(structure,0,0,"2");Edit(structure,1,0,"=A1*3");Edit(structure,2,1,"=A2+1");
+                structure.ApplyFormat([(1,0)],new CellFormat(Bold:true),out _);
+                structure.SetRowHeight(1,30);
+                Check(structure.InsertRow(0,out _) && structure.GetInput(2,0)=="=A2*3" &&
+                    structure.Grid.Rows[2][0].ToString()=="6" && structure.Grid.Rows[3][1].ToString()=="7" &&
+                    structure.GetEffectiveFormat(2,0).Bold==true && structure.RowHeights[2]==30,
+                    "insert row shifts values, dependents, formats, and dimensions");
+                Check(structure.DeleteRow(0,out _) && structure.Grid.Rows[1][0].ToString()=="6" &&
+                    structure.Grid.Rows[2][1].ToString()=="7","delete row shifts dependents back");
+                Check(structure.InsertColumn(0,out _) && structure.GetInput(2,2)=="=B2+1" &&
+                    structure.Grid.Rows[2][1].ToString()=="6" && structure.Grid.Rows[2][2].ToString()=="7",
+                    "insert column adjusts references");
+                Check(structure.DeleteColumn(0,out _) && structure.Grid.Rows[2][0].ToString()=="6" &&
+                    structure.Grid.Rows[2][1].ToString()=="7","delete column restores dependent coordinates");
+                Check(!structure.Undo(out _),"structural edit resets incompatible undo history");
+            }
+            using(var deletedReference=new WorksheetSession("Deleted reference")) {
+                Edit(deletedReference,0,0,"4");Edit(deletedReference,1,0,"=A1*2");
+                Check(deletedReference.DeleteRow(0,out _) && deletedReference.Grid.Rows[0][0].ToString()=="#REF!",
+                    "deleting a referenced row reports a formula error");
+            }
             using var s=new WorksheetSession("Mixed العربية");Check(s.EngineAvailable,"native available");
             Edit(s,0,0,"Label");Edit(s,0,1,"Value");Edit(s,1,0,"مرحبا");Edit(s,1,1,"2");
             Edit(s,2,0,"B");Edit(s,2,1,"10");Edit(s,3,0,"C");Edit(s,3,1,"=1/2");
@@ -158,8 +196,17 @@ internal static class Program
                     Check(native.TryGetCell(9,9,out var cell)==SheetStatus.Ok && (uint)cell.ErrorCode==managed.Error && cell.Value.Num==managed.Value.Numerator && cell.Value.Den==managed.Value.Denominator,"numeric parity "+f);
                 }
             }
+            string? previousTestArtifacts=Environment.GetEnvironmentVariable("KHZ_TEST_ARTIFACTS");
+            string? previousRecoveryDirectory=Environment.GetEnvironmentVariable("KHZ_RECOVERY_DIRECTORY");
+            string recoveryDirectory=Path.Combine(dir,"recovery");
+            Environment.SetEnvironmentVariable("KHZ_TEST_ARTIFACTS",dir);
+            Environment.SetEnvironmentVariable("KHZ_RECOVERY_DIRECTORY",recoveryDirectory);
             App app=new();app.InitializeComponent();app.ShutdownMode=ShutdownMode.OnExplicitShutdown;
             MainWindow window=new();window.Show();window.UpdateLayout();
+            DataGridCell errorVisual=new();
+            CellVisualFormat.Apply(errorVisual,CellFormat.Empty,"#DIV/0!");
+            Check(((SolidColorBrush)errorVisual.Background).Color==(Color)ColorConverter.ConvertFromString("#4A1F24") &&
+                errorVisual.FontWeight==FontWeights.Bold,"formula error cells use a distinct visual treatment");
             ListBox tabs=(ListBox)window.FindName("SheetList");
             var unavailableUi=new WorksheetSession("Unavailable UI",false,loadError);
             ((ObservableCollection<WorksheetSession>)tabs.ItemsSource).Add(unavailableUi);
@@ -169,7 +216,9 @@ internal static class Program
             Check(!((Button)window.FindName("RecalculateButton")).IsEnabled &&
                 !((Button)window.FindName("VerifyButton")).IsEnabled &&
                 !((Button)window.FindName("CopyProofButton")).IsEnabled &&
-                !((Button)window.FindName("ExportXlsxButton")).IsEnabled,"calculation commands disabled without native engine");
+                !((Button)window.FindName("ExportXlsxButton")).IsEnabled &&
+                !((Button)window.FindName("InsertRowButton")).IsEnabled &&
+                !((Button)window.FindName("DeleteColumnButton")).IsEnabled,"calculation commands disabled without native engine");
             var clickSheet=new WorksheetSession("Click");
             ((ObservableCollection<WorksheetSession>)tabs.ItemsSource).Add(clickSheet);
             tabs.SelectedItem=clickSheet;Pump();
@@ -206,11 +255,25 @@ internal static class Program
             DataGridCell farCell=Visuals<DataGridCell>(grid).Single(cell=>cell.Column==grid.Columns[4] && cell.DataContext==farRow);
             Check(((SolidColorBrush)farCell.Background).Color==(Color)ColorConverter.ConvertFromString("#ABCDEF") &&
                 farCell.FontWeight==FontWeights.Bold,"virtualized distant cell applies its format on realization");
+            TextBox nameBox=(TextBox)window.FindName("NameBox");nameBox.Text="E201";
+            nameBox.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice,PresentationSource.FromVisual(nameBox)!,0,Key.Enter){RoutedEvent=Keyboard.KeyDownEvent});
+            Pump();
+            Check(grid.CurrentCell.Column?.DisplayIndex==4 && grid.CurrentItem is DataRowView jumpRow &&
+                s.Grid.Rows.IndexOf(jumpRow.Row)==200,"Name Box jumps to a distant cell");
+            Check(((TextBlock)window.FindName("SelectionStatsText")).Text.Contains("Count 0",StringComparison.Ordinal),"selection status reports numeric count");
+            Check(Visuals<Button>(window).Where(button=>button.Content is string).Select(button=>(string)button.Content).ToHashSet()
+                .IsSupersetOf(new[]{"Insert Row","Delete Row","Insert Column","Delete Column"}) &&
+                ((Button)window.FindName("ExportXlsxButton")).ToolTip?.ToString()?.Contains("active sheet only",StringComparison.Ordinal)==true,
+                "structural commands are visible and multi-sheet export limitation is disclosed");
             grid.Columns[0].Width=134.5;window.UpdateLayout();
             DataGridColumnHeader resizeHeader=Visuals<DataGridColumnHeader>(grid).Single(header=>header.Column==grid.Columns[0]);
             Thumb resizeGrip=Visuals<Thumb>(resizeHeader).First();
             resizeGrip.RaiseEvent(new DragCompletedEventArgs(10,0,false){RoutedEvent=Thumb.DragCompletedEvent});
             Check(Math.Abs(s.ColumnWidths[0]-18.5)<.01,"column resize captured in XLSX width units");
+            DataGridColumnHeader autoFitHeader=Visuals<DataGridColumnHeader>(grid).Single(header=>header.Column==grid.Columns[1]);
+            autoFitHeader.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,0,MouseButton.Left){RoutedEvent=Control.MouseDoubleClickEvent});
+            Pump();
+            Check(s.ColumnWidths.ContainsKey(1),"column double-click auto-fit persists only the resized column");
             ((TextBox)window.FindName("RowHeightBox")).Text="30";Click("Row Height");
             Check(s.RowHeights[3]==30,"row height control targets native row");
             TextBox formula=(TextBox)window.FindName("FormulaBox");formula.Text="=IF(A1>2,ROUND(1.005,2),0)";
@@ -239,7 +302,23 @@ internal static class Program
                 AutomationPeer peer=UIElementAutomationPeer.CreatePeerForElement(view);
                 Check(peer.GetHelpText().Contains("5/4",StringComparison.Ordinal),chart.Kind+" accessible exact values");
             }
-            window.Close();app.Shutdown();
+            window.Close();
+            string recoveryManifest=Path.Combine(recoveryDirectory,"recovery.json");
+            Check(File.Exists(recoveryManifest) && Directory.GetDirectories(recoveryDirectory).Any(path=>Directory.GetFiles(path,"*.xlsx").Length>0),
+                "close writes a generation-based XLSX recovery snapshot");
+            MainWindow restoredWindow=new();restoredWindow.Show();Pump();
+            typeof(MainWindow).GetMethod("RestoreRecoverySnapshot",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(restoredWindow,null);
+            Pump();
+            ListBox restoredTabs=(ListBox)restoredWindow.FindName("SheetList");
+            WorksheetSession restoredSheet=((ObservableCollection<WorksheetSession>)restoredTabs.ItemsSource)
+                .Single(sheet=>sheet.Name=="Mixed العربية");
+            Check(restoredTabs.Items.Count==4 && restoredSheet.GetInput(3,1)=="=5/4" &&
+                restoredSheet.GetEffectiveFormat(200,4).Background=="#ABCDEF","recovery restores sheet inputs and presentation");
+            restoredWindow.Close();
+            Environment.SetEnvironmentVariable("KHZ_TEST_ARTIFACTS",previousTestArtifacts);
+            Environment.SetEnvironmentVariable("KHZ_RECOVERY_DIRECTORY",previousRecoveryDirectory);
+            app.Shutdown();
             Console.WriteLine($"checks={checks} failures=0");return 0;
         } catch(Exception ex) {Console.Error.WriteLine(ex);Console.WriteLine($"checks={checks} failures=1");return 1;}
         finally {if(artifacts is null) Directory.Delete(dir,true);}
