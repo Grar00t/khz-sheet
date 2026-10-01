@@ -72,7 +72,11 @@ typedef enum KhzFormulaOp {
     KHZ_FORMULA_LT = 23,
     KHZ_FORMULA_LE = 24,
     KHZ_FORMULA_GT = 25,
-    KHZ_FORMULA_GE = 26
+    KHZ_FORMULA_GE = 26,
+    KHZ_FORMULA_AND = 27,
+    KHZ_FORMULA_OR = 28,
+    KHZ_FORMULA_NOT = 29,
+    KHZ_FORMULA_IFERROR = 30
 } KhzFormulaOp;
 
 /* RANGE and NEG are additions to the ten operations that were specified.

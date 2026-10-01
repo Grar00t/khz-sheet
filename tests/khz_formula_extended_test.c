@@ -22,6 +22,14 @@ static void value(KhzSheet *sheet, const char *source, int64_t n, int64_t d, uns
     }
     khz_arena_destroy(&arena);
 }
+static void invalid(const char *source)
+{
+    KhzArena arena; KhzFormula formula;
+    CHECK(khz_arena_init(&arena, 1048576) == KHZ_ARENA_OK);
+    CHECK(khz_formula_parse(&formula, &arena, 10, 10, source, strlen(source), NULL)
+          == KHZ_SHEET_ERR_FORMAT);
+    khz_arena_destroy(&arena);
+}
 int main(void)
 {
     KhzSheet sheet;
@@ -44,6 +52,21 @@ int main(void)
     value(&sheet,"ROUND(1,0.5)",0,1,KHZ_CELL_ERROR_NUM);
     value(&sheet,"IF(1<2,3/7,1/0)",3,7,0); value(&sheet,"IF(FALSE,1/0,2)",2,1,0);
     value(&sheet,"IF(1/0,1,2)",0,1,KHZ_CELL_ERROR_DIV0);
+    value(&sheet,"AND(TRUE,1=1)",1,1,0);
+    value(&sheet,"AND(TRUE,FALSE,1=1)",0,1,0);
+    value(&sheet,"OR(FALSE,1=2)",0,1,0);
+    value(&sheet,"OR(FALSE,1=1)",1,1,0);
+    value(&sheet,"NOT(0)",1,1,0);
+    value(&sheet,"NOT(3/7)",0,1,0);
+    value(&sheet,"IFERROR(1/0,2/7)",2,7,0);
+    value(&sheet,"IFERROR(5/7,1/0)",5,7,0);
+    value(&sheet,"IFERROR(A5,2/7)",2,7,0);
+    value(&sheet,"AND(A5,TRUE)",0,1,KHZ_CELL_ERROR_DIV0);
+    value(&sheet,"IFERROR(IF(AND(TRUE,1=1),1/0,3),NOT(FALSE))",1,1,0);
+    invalid("AND()");
+    invalid("NOT(1,2)");
+    invalid("IFERROR(1)");
+    invalid("IFERROR(1,2,3)");
     value(&sheet,"1+2=3",1,1,0); value(&sheet,"1<>1",0,1,0);
     value(&sheet,"IF(2>=2,IF(2<=1,0,7),3)",7,1,0);
     for (int64_t n=-1000;n<=1000;++n) {
@@ -62,6 +85,14 @@ int main(void)
     CHECK(khz_sheet_set_i64(&sheet,0,0,4)==KHZ_SHEET_OK);
     CHECK(khz_formula_recalc(&sheet,NULL)==KHZ_SHEET_OK);
     value(&sheet,"B1",12,1,0);
+    CHECK(khz_sheet_verify_chain(&sheet,NULL)==KHZ_SHEET_OK);
+    CHECK(khz_formula_set(&sheet,2,0,"IFERROR(1/A1,AND(FALSE,NOT(FALSE)))",
+                          strlen("IFERROR(1/A1,AND(FALSE,NOT(FALSE)))"),NULL)==KHZ_SHEET_OK);
+    CHECK(khz_formula_recalc(&sheet,NULL)==KHZ_SHEET_OK);
+    value(&sheet,"C1",1,4,0);
+    CHECK(khz_sheet_set_i64(&sheet,0,0,0)==KHZ_SHEET_OK);
+    CHECK(khz_formula_recalc(&sheet,NULL)==KHZ_SHEET_OK);
+    value(&sheet,"C1",0,1,0);
     CHECK(khz_sheet_verify_chain(&sheet,NULL)==KHZ_SHEET_OK);
     khz_sheet_destroy(&sheet);
     printf("checks=%d failures=%d\n",checks,failures);

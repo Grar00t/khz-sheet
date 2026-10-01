@@ -141,7 +141,9 @@ internal static class Program
                 Check(FormulaParser.TryParse(new string('(',100)+"1"+new string(')',100),out _)==SheetStatus.ErrLimit,"managed nesting limit");
                 Check(FormulaLexer.TryTokenize(new string('1',8193),out _)==SheetStatus.ErrLimit,"managed source limit");
                 string[] formulas=["COUNT(A1:A4)","COUNTA(A1:A4)","PRODUCT(A1:A2)","ABS(-1/3)","ROUND(1.005,2)","ROUND(-150,-2)",
-                    "CEILING(-3/2)","FLOOR(-3/2)","IF(A1<3,7/9,1/0)","IF(FALSE,1/0,2)","1+2=3","1<>2","2<=2","3>2","3>=4"];
+                    "CEILING(-3/2)","FLOOR(-3/2)","IF(A1<3,7/9,1/0)","IF(FALSE,1/0,2)",
+                    "AND(TRUE,1=1)","OR(FALSE,1=1)","NOT(FALSE)","IFERROR(1/0,2/7)","IFERROR(1,1/0)",
+                    "1+2=3","1<>2","2<=2","3>2","3>=4"];
                 foreach(string f in formulas) {
                     Check(FormulaParser.TryParse(f,out FormulaNode? ast)==SheetStatus.Ok && ast is not null,"managed parse "+f);
                     Check(native.TryEvaluate(9,9,ast!,out var managed)==SheetStatus.Ok,"managed lower "+f);

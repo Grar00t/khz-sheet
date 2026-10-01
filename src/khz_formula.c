@@ -187,6 +187,18 @@ KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
     case KHZ_FORMULA_IF:
         if (child_count != 3) return KHZ_SHEET_ERR_FORMAT;
         break;
+    case KHZ_FORMULA_IFERROR:
+        if (child_count != 2) return KHZ_SHEET_ERR_FORMAT;
+        break;
+    case KHZ_FORMULA_AND:
+    case KHZ_FORMULA_OR:
+        if (child_count == (size_t)0 || child_count > KHZ_FORMULA_MAX_ARGS) {
+            return KHZ_SHEET_ERR_FORMAT;
+        }
+        break;
+    case KHZ_FORMULA_NOT:
+        if (child_count != (size_t)1) return KHZ_SHEET_ERR_FORMAT;
+        break;
     case KHZ_FORMULA_NEG:
     case KHZ_FORMULA_ABS:
     case KHZ_FORMULA_CEILING:
@@ -272,6 +284,10 @@ const char *khz_formula_op_name(KhzFormulaOp op)
     case KHZ_FORMULA_CEILING: return "CEILING";
     case KHZ_FORMULA_FLOOR: return "FLOOR";
     case KHZ_FORMULA_IF: return "IF";
+    case KHZ_FORMULA_AND: return "AND";
+    case KHZ_FORMULA_OR: return "OR";
+    case KHZ_FORMULA_NOT: return "NOT";
+    case KHZ_FORMULA_IFERROR: return "IFERROR";
     case KHZ_FORMULA_EQ: return "EQ";
     case KHZ_FORMULA_NE: return "NE";
     case KHZ_FORMULA_LT: return "LT";
@@ -601,6 +617,14 @@ static KhzSheetStatus khz_function_op(const char *text, size_t len, KhzFormulaOp
         *op = KHZ_FORMULA_FLOOR;
     } else if (khz_word_matches(text, len, "IF")) {
         *op = KHZ_FORMULA_IF;
+    } else if (khz_word_matches(text, len, "AND")) {
+        *op = KHZ_FORMULA_AND;
+    } else if (khz_word_matches(text, len, "OR")) {
+        *op = KHZ_FORMULA_OR;
+    } else if (khz_word_matches(text, len, "NOT")) {
+        *op = KHZ_FORMULA_NOT;
+    } else if (khz_word_matches(text, len, "IFERROR")) {
+        *op = KHZ_FORMULA_IFERROR;
     } else {
         return KHZ_SHEET_ERR_MISSING;
     }

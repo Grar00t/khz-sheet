@@ -729,6 +729,36 @@ static KhzSheetStatus khz_eval_node(KhzSheet *sheet, const KhzFormulaNode *node,
         if (status != KHZ_SHEET_OK) return status;
         if (khz_result_is_error(&left)) { *out = left; return KHZ_SHEET_OK; }
         return khz_eval_node(sheet, node->children[left.value.num != 0 ? 1 : 2], depth + 1, out);
+    case KHZ_FORMULA_IFERROR:
+        if (node->child_count != 2 || !node->children || !node->children[0]
+            || !node->children[1]) return KHZ_SHEET_ERR_FORMAT;
+        status = khz_eval_node(sheet, node->children[0], depth + 1, &left);
+        if (status != KHZ_SHEET_OK) return status;
+        if (!khz_result_is_error(&left)) { *out = left; return KHZ_SHEET_OK; }
+        return khz_eval_node(sheet, node->children[1], depth + 1, out);
+    case KHZ_FORMULA_NOT:
+        if (node->child_count != 1 || !node->children || !node->children[0])
+            return KHZ_SHEET_ERR_FORMAT;
+        status = khz_eval_node(sheet, node->children[0], depth + 1, &left);
+        if (status != KHZ_SHEET_OK) return status;
+        if (khz_result_is_error(&left)) { *out = left; return KHZ_SHEET_OK; }
+        return khz_result_value(out, (KhzRational){left.value.num == 0 ? 1 : 0, 1});
+    case KHZ_FORMULA_AND:
+    case KHZ_FORMULA_OR: {
+        int truth = node->op == KHZ_FORMULA_AND;
+        if (node->child_count == 0 || node->child_count > KHZ_FORMULA_MAX_ARGS
+            || !node->children) return KHZ_SHEET_ERR_FORMAT;
+        for (uint32_t i = 0; i < node->child_count; ++i) {
+            KhzFormulaResult argument;
+            if (!node->children[i]) return KHZ_SHEET_ERR_FORMAT;
+            status = khz_eval_node(sheet, node->children[i], depth + 1, &argument);
+            if (status != KHZ_SHEET_OK) return status;
+            if (khz_result_is_error(&argument)) { *out = argument; return KHZ_SHEET_OK; }
+            if (node->op == KHZ_FORMULA_AND) truth = truth && argument.value.num != 0;
+            else truth = truth || argument.value.num != 0;
+        }
+        return khz_result_value(out, (KhzRational){truth, 1});
+    }
     case KHZ_FORMULA_ABS:
     case KHZ_FORMULA_CEILING:
     case KHZ_FORMULA_FLOOR:

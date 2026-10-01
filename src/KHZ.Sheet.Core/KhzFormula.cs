@@ -36,6 +36,10 @@ namespace KHZ.Sheet.Core
 		LessEqual = 24,
 		Greater = 25,
 		GreaterEqual = 26,
+		And = 27,
+		Or = 28,
+		Not = 29,
+		IfError = 30,
 
 	}
 
@@ -808,6 +812,10 @@ namespace KHZ.Sheet.Core
 				case "CEILING": op = KhzFormulaOp.Ceiling; break;
 				case "FLOOR": op = KhzFormulaOp.Floor; break;
 				case "IF": op = KhzFormulaOp.If; break;
+				case "AND": op = KhzFormulaOp.And; break;
+				case "OR": op = KhzFormulaOp.Or; break;
+				case "NOT": op = KhzFormulaOp.Not; break;
+				case "IFERROR": op = KhzFormulaOp.IfError; break;
 
 				default:
 					return SheetStatus.ErrUnsupported;
