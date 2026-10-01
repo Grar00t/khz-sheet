@@ -70,7 +70,9 @@ internal static class Program
             using(var workbook=new WorkbookSession()) {
                 WorksheetSession original=workbook.Sheets[0];
                 Check(original.CommitCell(0,0,"7/9",out _),"sheet management source value");
-                Check(workbook.TryRenameSheet(original,"Overview",out _) && original.Name=="Overview","sheet rename");
+                bool nameChanged=false;
+                original.PropertyChanged+=(_,args)=>nameChanged|=args.PropertyName==nameof(WorksheetSession.Name);
+                Check(workbook.TryRenameSheet(original,"Overview",out _) && nameChanged && original.Name=="Overview","sheet rename notifies the tab binding");
                 workbook.AddSheet("Details");
                 Check(!workbook.TryRenameSheet(original,"Details",out _) && original.Name=="Overview","duplicate sheet name refused");
                 original.ApplyFormat([(0,0)],new CellFormat(Bold:true),out _);
@@ -257,6 +259,26 @@ internal static class Program
             grid.CurrentCell=new DataGridCellInfo(s.Grid.DefaultView[1],grid.Columns[1]);
             grid.SelectedCells.Add(grid.CurrentCell);window.UpdateLayout();
             void Click(string title)=>Visuals<Button>(window).Single(b=>b.Content is string text && text==title).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            void RaiseGridKey(Key key)
+            {
+                Keyboard.Focus(grid);
+                grid.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice,PresentationSource.FromVisual(grid)!,0,key)
+                    {RoutedEvent=Keyboard.PreviewKeyDownEvent});
+                Pump();
+            }
+            void InvokeWindow(string method,params object?[] arguments)=>
+                typeof(MainWindow).GetMethod(method,System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(window,arguments);
+            void SelectRectangle(int firstRow,int lastRow,int firstColumn,int lastColumn)
+            {
+                grid.SelectedCells.Clear();
+                for(int row=firstRow;row<=lastRow;++row)
+                {
+                    DataRowView item=grid.Items.Cast<DataRowView>().Single(view=>s.Grid.Rows.IndexOf(view.Row)==row);
+                    for(int column=firstColumn;column<=lastColumn;++column)
+                        grid.SelectedCells.Add(new DataGridCellInfo(item,grid.Columns[column]));
+                }
+            }
             Click("Sort ↑");Pump();
             Check(grid.Columns.Count==s.Grid.Columns.Count && !grid.Columns[1].IsReadOnly,"sort retains editable table descriptors");
             var first=(DataRowView)grid.Items[1];Check(s.Grid.Rows.IndexOf(first.Row)==3,"actual sort button retains coordinates");
@@ -286,10 +308,55 @@ internal static class Program
             Check(grid.CurrentCell.Column?.DisplayIndex==4 && grid.CurrentItem is DataRowView jumpRow &&
                 s.Grid.Rows.IndexOf(jumpRow.Row)==200,"Name Box jumps to a distant cell");
             Check(((TextBlock)window.FindName("SelectionStatsText")).Text.Contains("Count 0",StringComparison.Ordinal),"selection status reports numeric count");
+            RaiseGridKey(Key.F2);
+            DataRowView editTarget=(DataRowView)grid.CurrentItem;
+            DataGridCell f2Cell=Visuals<DataGridCell>(grid).Single(cell=>cell.Column==grid.Columns[4] && cell.DataContext==editTarget);
+            Check(Visuals<TextBox>(f2Cell).Any(),"F2 enters cell edit mode");
+            RaiseGridKey(Key.Enter);
+            Check(grid.CurrentItem is DataRowView enterRow && s.Grid.Rows.IndexOf(enterRow.Row)==201 &&
+                grid.CurrentCell.Column?.DisplayIndex==4,"Enter commits and moves down");
+            RaiseGridKey(Key.Tab);
+            Check(grid.CurrentItem is DataRowView tabRow && s.Grid.Rows.IndexOf(tabRow.Row)==201 &&
+                grid.CurrentCell.Column?.DisplayIndex==5,"Tab moves to the next cell");
+            var shiftTab=MainWindow.NextNavigationCell(201,5,Key.Tab,true,grid.Columns.Count);
+            Check(shiftTab.Row==201 && shiftTab.Column==4 &&
+                MainWindow.NextNavigationCell(201,0,Key.Tab,true,grid.Columns.Count)==(200,grid.Columns.Count-1),
+                "Shift+Tab moves to the previous cell and wraps");
+            RaiseGridKey(Key.Home);
+            Check(grid.CurrentItem is DataRowView homeRow && s.Grid.Rows.IndexOf(homeRow.Row)==201 &&
+                grid.CurrentCell.Column?.DisplayIndex==0,"Home moves to the first column");
+            RaiseGridKey(Key.End);
+            Check(grid.CurrentCell.Column?.DisplayIndex==grid.Columns.Count-1,"End moves to the last column");
+            object?[] edgeArguments={s,1,0,Key.Right};
+            typeof(MainWindow).GetMethod("MoveToDataEdge",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(window,edgeArguments);
+            Check((int)edgeArguments[2]! == 1,"Ctrl+Arrow data-edge calculation");
+            SelectRectangle(1,2,1,1);Pump();
+            string selectionStats=((TextBlock)window.FindName("SelectionStatsText")).Text;
+            Check(selectionStats.Contains("Sum 12",StringComparison.Ordinal) &&
+                selectionStats.Contains("Average 6",StringComparison.Ordinal) &&
+                selectionStats.Contains("Count 2",StringComparison.Ordinal),"selection status reports Sum, Average, and Count");
+            Check(MainWindow.GetGridShortcut(Key.C,ModifierKeys.Control)==MainWindow.GridShortcut.Copy &&
+                MainWindow.GetGridShortcut(Key.V,ModifierKeys.Control)==MainWindow.GridShortcut.Paste &&
+                MainWindow.GetGridShortcut(Key.D,ModifierKeys.Control)==MainWindow.GridShortcut.FillDown &&
+                MainWindow.GetGridShortcut(Key.R,ModifierKeys.Control)==MainWindow.GridShortcut.FillRight,
+                "Ctrl+C/V/D/R map to rectangular copy, paste, and fill actions");
             Check(Visuals<Button>(window).Where(button=>button.Content is string).Select(button=>(string)button.Content).ToHashSet()
                 .IsSupersetOf(new[]{"Insert Row","Delete Row","Insert Column","Delete Column"}) &&
                 ((Button)window.FindName("ExportXlsxButton")).ToolTip?.ToString()?.Contains("active sheet only",StringComparison.Ordinal)==true,
                 "structural commands are visible and multi-sheet export limitation is disclosed");
+            Edit(s,20,5,"left");Edit(s,20,6,"right");Edit(s,21,5,"bottom");Edit(s,21,6,"edge");
+            SelectRectangle(20,21,5,6);InvokeWindow("CopySelection");
+            Check(Clipboard.GetText()=="left\tright\r\nbottom\tedge","copy produces rectangular tab-separated cells");
+            InvokeWindow("NavigateTo",22,10);InvokeWindow("PasteClipboard");
+            Check(s.GetInput(22,10)=="left" && s.GetInput(22,11)=="right" &&
+                s.GetInput(23,10)=="bottom" && s.GetInput(23,11)=="edge","paste restores a rectangular range");
+            Edit(s,30,5,"north");Edit(s,30,6,"south");
+            SelectRectangle(30,32,5,6);InvokeWindow("FillSelection",true);
+            Check(s.GetInput(31,5)=="north" && s.GetInput(32,6)=="south","fill down repeats each source-row cell");
+            Edit(s,40,8,"one");Edit(s,41,8,"two");
+            SelectRectangle(40,41,8,10);InvokeWindow("FillSelection",false);
+            Check(s.GetInput(40,9)=="one" && s.GetInput(41,10)=="two","fill right repeats each source-column cell");
             grid.Columns[0].Width=134.5;window.UpdateLayout();
             DataGridColumnHeader resizeHeader=Visuals<DataGridColumnHeader>(grid).Single(header=>header.Column==grid.Columns[0]);
             Thumb resizeGrip=Visuals<Thumb>(resizeHeader).First();

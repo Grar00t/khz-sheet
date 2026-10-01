@@ -543,24 +543,25 @@ public partial class MainWindow : Window
         bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
         if (Keyboard.FocusedElement is TextBox && e.Key is not (Key.Enter or Key.Tab)) return;
 
-        if (control && e.Key == Key.C)
+        GridShortcut shortcut=GetGridShortcut(e.Key,Keyboard.Modifiers);
+        if (shortcut==GridShortcut.Copy)
         {
             e.Handled = true;
             CopySelection();
             return;
         }
 
-        if (control && e.Key == Key.V)
+        if (shortcut==GridShortcut.Paste)
         {
             e.Handled = true;
             PasteClipboard();
             return;
         }
 
-        if (control && e.Key is Key.D or Key.R)
+        if (shortcut is GridShortcut.FillDown or GridShortcut.FillRight)
         {
             e.Handled = true;
-            FillSelection(down: e.Key == Key.D);
+            FillSelection(down: shortcut==GridShortcut.FillDown);
             return;
         }
 
@@ -596,14 +597,7 @@ public partial class MainWindow : Window
             e.Handled=true;
             SheetGrid.CommitEdit(DataGridEditingUnit.Cell,true);
             SheetGrid.CommitEdit(DataGridEditingUnit.Row,true);
-            int nextRow=row,nextColumn=column;
-            if(e.Key==Key.Enter) nextRow+=shift?-1:1;
-            else
-            {
-                nextColumn+=shift?-1:1;
-                if(nextColumn<0) { nextColumn=SheetGrid.Columns.Count-1; --nextRow; }
-                else if(nextColumn>=SheetGrid.Columns.Count) { nextColumn=0; ++nextRow; }
-            }
+            (int nextRow,int nextColumn)=NextNavigationCell(row,column,e.Key,shift,SheetGrid.Columns.Count);
             if(nextRow>=0 && nextRow<CurrentSheet!.Grid.Rows.Count)
                 Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>NavigateTo(nextRow,nextColumn)));
             return;
@@ -624,6 +618,30 @@ public partial class MainWindow : Window
             e.Handled=true;
             NavigateTo(row,column);
         }
+    }
+
+    internal enum GridShortcut { None, Copy, Paste, FillDown, FillRight }
+
+    internal static GridShortcut GetGridShortcut(Key key,ModifierKeys modifiers)
+    {
+        if((modifiers&ModifierKeys.Control)==0) return GridShortcut.None;
+        return key switch
+        {
+            Key.C=>GridShortcut.Copy,
+            Key.V=>GridShortcut.Paste,
+            Key.D=>GridShortcut.FillDown,
+            Key.R=>GridShortcut.FillRight,
+            _=>GridShortcut.None
+        };
+    }
+
+    internal static (int Row,int Column) NextNavigationCell(int row,int column,Key key,bool shift,int columnCount)
+    {
+        if(key==Key.Enter) return (row+(shift?-1:1),column);
+        column+=shift?-1:1;
+        if(column<0) return (row-1,columnCount-1);
+        if(column>=columnCount) return (row+1,0);
+        return (row,column);
     }
 
     private IEnumerable<DataGridCell> VisualsForRow(DataRowView item) =>

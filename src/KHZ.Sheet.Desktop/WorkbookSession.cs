@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Data;
 using System.Globalization;
 using System.Numerics;
@@ -116,7 +117,7 @@ public sealed class WorkbookSession : IDisposable
     }
 }
 
-public sealed partial class WorksheetSession : IDisposable
+public sealed partial class WorksheetSession : IDisposable,INotifyPropertyChanged
 {
     private const int DefaultRows = 256;
     private const int DefaultColumns = 52;
@@ -183,9 +184,13 @@ public sealed partial class WorksheetSession : IDisposable
 
     internal void Rename(string name)
     {
+        if(string.Equals(Name,name,StringComparison.Ordinal)) return;
         Name = name;
+        PropertyChanged?.Invoke(this,new PropertyChangedEventArgs(nameof(Name)));
         MarkDirty();
     }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     internal void MarkDirty()
     {
