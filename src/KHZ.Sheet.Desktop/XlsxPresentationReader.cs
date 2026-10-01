@@ -249,9 +249,12 @@ internal static partial class XlsxPresentationSerializer
                         throw new NotSupportedException("Invalid or unsupported frozen pane");
                     string expected=WorksheetSession.ColumnName(columns)+(rows+1).ToString(CultureInfo.InvariantCulture);
                     string activePane=columns>0?(rows>0?"bottomRight":"topRight"):"bottomLeft";
-                    if(!string.Equals((string?)pane.Attribute("topLeftCell"),expected,StringComparison.OrdinalIgnoreCase) ||
-                       !string.Equals((string?)pane.Attribute("activePane"),activePane,StringComparison.Ordinal))
-                        throw new InvalidDataException("Frozen pane coordinates do not match its splits");
+                    string? topLeft=(string?)pane.Attribute("topLeftCell");
+                    string? active=(string?)pane.Attribute("activePane");
+                    if(topLeft is not null && !string.Equals(topLeft,expected,StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("Frozen pane top-left cell does not match its splits");
+                    if(active is not null && !string.Equals(active,activePane,StringComparison.Ordinal))
+                        throw new InvalidDataException("Frozen pane active pane does not match its splits");
                     session.SetFrozenColumns(columns);
                     session.SetFrozenRows(rows);
                 }

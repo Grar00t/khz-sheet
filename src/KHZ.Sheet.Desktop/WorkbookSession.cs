@@ -112,6 +112,7 @@ public sealed class WorkbookSession : IDisposable
 
     public static bool IsValidSheetName(string? name) =>
         name is { Length: >= 1 and <= 31 } &&
+        !string.IsNullOrWhiteSpace(name) &&
         name[0] != '\'' && name[^1] != '\'' &&
         name.IndexOfAny([':', '\\', '/', '?', '*', '[', ']']) < 0;
 
