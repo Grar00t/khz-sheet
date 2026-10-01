@@ -20,6 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --no-tags origin manual/khz-sheet-local-private
           git show 90852d69b2cf6938303bdb39b57afc09499f1607 -- \
             src/KHZ.Sheet.Desktop/MainWindow.xaml.cs \
             src/KHZ.Sheet.Desktop/WorkbookObjectsSession.cs \
