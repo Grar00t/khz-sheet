@@ -1,0 +1,35 @@
+name: Apply isolated manual atomic edit
+
+on:
+  push:
+    branches: [manual/khz-sheet-atomic-clean]
+    paths: [.github/workflows/apply-isolated-atomic-edit.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: manual/khz-sheet-atomic-clean
+          fetch-depth: 0
+      - name: Apply exact four-file implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show 90852d69b2cf6938303bdb39b57afc09499f1607 -- \
+            src/KHZ.Sheet.Desktop/MainWindow.xaml.cs \
+            src/KHZ.Sheet.Desktop/WorkbookObjectsSession.cs \
+            src/KHZ.Sheet.Desktop/WorkbookSession.cs \
+            tests/dotnet/KhzSubsystemContracts/Program.cs | git apply --index
+          rm .github/workflows/apply-isolated-atomic-edit.yml
+          git add -A
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 4
+          git config user.name 'khz-sheet manual automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'Implement isolated atomic multi-cell edits'
+          git push origin HEAD:manual/khz-sheet-atomic-clean
