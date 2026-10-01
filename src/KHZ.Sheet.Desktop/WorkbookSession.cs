@@ -180,6 +180,7 @@ public sealed partial class WorksheetSession : IDisposable
 
     private abstract record WorksheetEdit;
     private sealed record CellEdit(int Row, int Column, string Before, string After) : WorksheetEdit;
+    private sealed record CellBatchEdit(IReadOnlyList<CellEdit> Cells) : WorksheetEdit;
     private sealed record FormatEdit(IReadOnlyList<FormatChange> Changes) : WorksheetEdit;
     private sealed record TableEdit(TableFormat Table) : WorksheetEdit;
     private readonly record struct FormatChange(long Key, CellFormat? Before, CellFormat? After);
@@ -500,6 +501,8 @@ public sealed partial class WorksheetSession : IDisposable
                 message = $"{(undo ? "undo" : "redo")} · {ColumnName(cell.Column)}{cell.Row + 1}";
                 return true;
             }
+            case CellBatchEdit batch:
+                return ApplyCellBatchHistory(batch, undo, out message);
             case FormatEdit format:
                 foreach (FormatChange change in format.Changes)
                 {

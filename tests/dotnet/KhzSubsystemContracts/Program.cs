@@ -61,6 +61,21 @@ internal static class Program
             Edit(s,0,0,"Label");Edit(s,0,1,"Value");Edit(s,1,0,"مرحبا");Edit(s,1,1,"2");
             Edit(s,2,0,"B");Edit(s,2,1,"10");Edit(s,3,0,"C");Edit(s,3,1,"=1/2");
             Edit(s,6,2,"=SUM(B2:B4)");Check(!s.CommitCell(1,1,"=SUM(",out _),"failed edit refused");Check(s.GetInput(1,1)=="2","failed edit preserves input");
+            using(var atomic=new WorksheetSession("AtomicEdit"))
+            {
+                Check(atomic.CommitCellsAtomic(new[] { (0,0,(string?)"1"), (0,1,(string?)"=A1+1"), (1,0,(string?)"literal") },out _),
+                    "atomic multi-cell edit");
+                Check(atomic.Grid.Rows[0][1].ToString()=="2","atomic formulas see staged inputs");
+                Check(atomic.Undo(out _) && atomic.GetInput(0,0)=="" && atomic.GetInput(0,1)=="" && atomic.GetInput(1,0)=="",
+                    "atomic edit undoes as one action");
+                Check(atomic.Redo(out _) && atomic.Grid.Rows[0][1].ToString()=="2" && atomic.GetInput(1,0)=="literal",
+                    "atomic edit redoes as one action");
+                string before=atomic.GetInput(0,0);
+                Check(!atomic.CommitCellsAtomic(new[] { (0,0,(string?)"99"), (atomic.Grid.Rows.Count,0,(string?)"overflow") },out _) &&
+                    atomic.GetInput(0,0)==before,"out-of-range atomic edit changes nothing");
+                Check(!atomic.CommitCellsAtomic(new[] { (0,0,(string?)"99"), (2,0,(string?)"=SUM(") },out _) &&
+                    atomic.GetInput(0,0)==before && atomic.GetInput(2,0)=="","invalid formula atomic edit changes nothing");
+            }
             Check(s.SetColumnWidth(0,18.5)&&s.SetRowHeight(1,24),"dimensions accepted");
             Check(!s.SetColumnWidth(0,double.NaN)&&!s.SetRowHeight(1,500),"bad dimensions refused");s.SetFrozenColumns(1);
             var format=new CellFormat(FontFamily:"Consolas",FontSize:14,Bold:true,Italic:true,Foreground:"#123456",Background:"#ABCDEF",
