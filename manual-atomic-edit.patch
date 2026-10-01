@@ -10,3 +10,173 @@ Subject: [PATCH] Implement atomic multi-cell spreadsheet edits
  tests/dotnet/KhzSubsystemContracts/Program.cs | 15 ++++++
  4 files changed, 76 insertions(+), 28 deletions(-)
 
+diff --git a/src/KHZ.Sheet.Desktop/MainWindow.xaml.cs b/src/KHZ.Sheet.Desktop/MainWindow.xaml.cs
+index 59cd835..7a05458 100644
+--- a/src/KHZ.Sheet.Desktop/MainWindow.xaml.cs
++++ b/src/KHZ.Sheet.Desktop/MainWindow.xaml.cs
+@@ -618,33 +618,17 @@ public partial class MainWindow : Window
+             .Replace('\r', '\n')
+             .Split('\n');
+ 
+-        int written = 0;
+-        string lastMessage = string.Empty;
+-
++        List<(int Row, int Column, string? Input)> edits = new();
+         for (int rowOffset = 0; rowOffset < lines.Length; rowOffset++)
+         {
+-            if (rowOffset == lines.Length - 1 && lines[rowOffset].Length == 0)
+-            {
+-                continue;
+-            }
+-
++            if (rowOffset == lines.Length - 1 && lines[rowOffset].Length == 0) continue;
+             string[] cells = lines[rowOffset].Split('\t');
+             for (int columnOffset = 0; columnOffset < cells.Length; columnOffset++)
+-            {
+-                int row = startRow + rowOffset;
+-                int column = startColumn + columnOffset;
+-
+-                if (row >= sheet.Grid.Rows.Count || column >= sheet.Grid.Columns.Count)
+-                {
+-                    continue;
+-                }
+-
+-                sheet.CommitCell(row, column, cells[columnOffset], out lastMessage);
+-                written++;
+-            }
++                edits.Add((startRow + rowOffset, startColumn + columnOffset, cells[columnOffset]));
+         }
+ 
+-        SetStatus($"pasted {written:N0} cells · {lastMessage}");
++        bool pasted = sheet.CommitCellsAtomic(edits, out string message);
++        SetStatus(pasted ? $"pasted {edits.Count:N0} cells · one undo action" : $"paste refused · {message}");
+         RefreshEngineText();
+         SheetGrid.Items.Refresh();
+         UpdateFormulaBar();
+@@ -676,13 +660,9 @@ public partial class MainWindow : Window
+             }
+         }
+ 
+-        string lastMessage = string.Empty;
+-        foreach ((int row, int column) in cells.Distinct())
+-        {
+-            sheet.CommitCell(row, column, string.Empty, out lastMessage);
+-        }
+-
+-        SetStatus($"cleared {cells.Distinct().Count():N0} cells · {lastMessage}");
++        var edits = cells.Distinct().Select(cell => (cell.Row, cell.Column, (string?)string.Empty)).ToArray();
++        bool cleared = sheet.CommitCellsAtomic(edits, out string message);
++        SetStatus(cleared ? $"cleared {edits.Length:N0} cells · one undo action" : $"clear refused · {message}");
+         RefreshEngineText();
+         SheetGrid.Items.Refresh();
+         UpdateFormulaBar();
+diff --git a/src/KHZ.Sheet.Desktop/WorkbookObjectsSession.cs b/src/KHZ.Sheet.Desktop/WorkbookObjectsSession.cs
+index bd76d99..844485e 100644
+--- a/src/KHZ.Sheet.Desktop/WorkbookObjectsSession.cs
++++ b/src/KHZ.Sheet.Desktop/WorkbookObjectsSession.cs
+@@ -131,6 +131,56 @@ public sealed partial class WorksheetSession
+         return true;
+     }
+ 
++    private bool ApplyCellBatchHistory(CellBatchEdit edit, bool undo, out string message)
++    {
++        if (!StageValues(edit.Cells, undo, out WorksheetSession? candidate, out message)) return false;
++        using (candidate) AdoptValues(candidate!);
++        foreach (int row in edit.Cells.Select(cell => cell.Row).Distinct()) UpdateTableHeaders(row);
++        message = $"{(undo ? "undo" : "redo")} · {edit.Cells.Count:N0} cells";
++        return true;
++    }
++
++    public bool CommitCellsAtomic(IEnumerable<(int Row, int Column, string? Input)> cells, out string message)
++    {
++        ArgumentNullException.ThrowIfNull(cells);
++        var requested = new Dictionary<long, (int Row, int Column, string Input)>();
++        foreach ((int row, int column, string? input) in cells)
++        {
++            if (!InBounds(row, column))
++            {
++                message = SheetStatusText.Name(SheetStatus.ErrRange);
++                return false;
++            }
++            requested[Key(row, column)] = (row, column, input ?? string.Empty);
++        }
++        if (requested.Count == 0)
++        {
++            message = "no cells to edit";
++            return false;
++        }
++
++        List<CellEdit> changes = new(requested.Count);
++        foreach ((int row, int column, string input) in requested.Values)
++        {
++            string before = GetInput(row, column);
++            if (string.Equals(before, input, StringComparison.Ordinal)) continue;
++            if (!ValidateTableEdit(row, column, input, out message)) return false;
++            changes.Add(new CellEdit(row, column, before, input));
++        }
++        if (changes.Count == 0)
++        {
++            message = "cells unchanged";
++            return false;
++        }
++        if (!StageValues(changes, false, out WorksheetSession? candidate, out message)) return false;
++        using (candidate) AdoptValues(candidate!);
++        foreach (int row in changes.Select(cell => cell.Row).Distinct()) UpdateTableHeaders(row);
++        _undo.Push(new CellBatchEdit(changes.AsReadOnly()));
++        _redo.Clear();
++        message = $"edited {changes.Count:N0} cells";
++        return true;
++    }
++
+     public bool CreateTableWithTotals(CellRange selection, string name, out string message)
+     {
+         message = "Select headers and data with an empty row below for totals";
+diff --git a/src/KHZ.Sheet.Desktop/WorkbookSession.cs b/src/KHZ.Sheet.Desktop/WorkbookSession.cs
+index 8b96c91..3ffedfa 100644
+--- a/src/KHZ.Sheet.Desktop/WorkbookSession.cs
++++ b/src/KHZ.Sheet.Desktop/WorkbookSession.cs
+@@ -180,6 +180,7 @@ public sealed partial class WorksheetSession : IDisposable
+ 
+     private abstract record WorksheetEdit;
+     private sealed record CellEdit(int Row, int Column, string Before, string After) : WorksheetEdit;
++    private sealed record CellBatchEdit(IReadOnlyList<CellEdit> Cells) : WorksheetEdit;
+     private sealed record FormatEdit(IReadOnlyList<FormatChange> Changes) : WorksheetEdit;
+     private sealed record TableEdit(TableFormat Table) : WorksheetEdit;
+     private readonly record struct FormatChange(long Key, CellFormat? Before, CellFormat? After);
+@@ -500,6 +501,8 @@ public sealed partial class WorksheetSession : IDisposable
+                 message = $"{(undo ? "undo" : "redo")} · {ColumnName(cell.Column)}{cell.Row + 1}";
+                 return true;
+             }
++            case CellBatchEdit batch:
++                return ApplyCellBatchHistory(batch, undo, out message);
+             case FormatEdit format:
+                 foreach (FormatChange change in format.Changes)
+                 {
+diff --git a/tests/dotnet/KhzSubsystemContracts/Program.cs b/tests/dotnet/KhzSubsystemContracts/Program.cs
+index 8c8e13a..fbc5dff 100644
+--- a/tests/dotnet/KhzSubsystemContracts/Program.cs
++++ b/tests/dotnet/KhzSubsystemContracts/Program.cs
+@@ -61,6 +61,21 @@ internal static class Program
+             Edit(s,0,0,"Label");Edit(s,0,1,"Value");Edit(s,1,0,"مرحبا");Edit(s,1,1,"2");
+             Edit(s,2,0,"B");Edit(s,2,1,"10");Edit(s,3,0,"C");Edit(s,3,1,"=1/2");
+             Edit(s,6,2,"=SUM(B2:B4)");Check(!s.CommitCell(1,1,"=SUM(",out _),"failed edit refused");Check(s.GetInput(1,1)=="2","failed edit preserves input");
++            using(var atomic=new WorksheetSession("AtomicEdit"))
++            {
++                Check(atomic.CommitCellsAtomic(new[] { (0,0,(string?)"1"), (0,1,(string?)"=A1+1"), (1,0,(string?)"literal") },out _),
++                    "atomic multi-cell edit");
++                Check(atomic.Grid.Rows[0][1].ToString()=="2","atomic formulas see staged inputs");
++                Check(atomic.Undo(out _) && atomic.GetInput(0,0)=="" && atomic.GetInput(0,1)=="" && atomic.GetInput(1,0)=="",
++                    "atomic edit undoes as one action");
++                Check(atomic.Redo(out _) && atomic.Grid.Rows[0][1].ToString()=="2" && atomic.GetInput(1,0)=="literal",
++                    "atomic edit redoes as one action");
++                string before=atomic.GetInput(0,0);
++                Check(!atomic.CommitCellsAtomic(new[] { (0,0,(string?)"99"), (atomic.Grid.Rows.Count,0,(string?)"overflow") },out _) &&
++                    atomic.GetInput(0,0)==before,"out-of-range atomic edit changes nothing");
++                Check(!atomic.CommitCellsAtomic(new[] { (0,0,(string?)"99"), (2,0,(string?)"=SUM(") },out _) &&
++                    atomic.GetInput(0,0)==before && atomic.GetInput(2,0)=="","invalid formula atomic edit changes nothing");
++            }
+             Check(s.SetColumnWidth(0,18.5)&&s.SetRowHeight(1,24),"dimensions accepted");
+             Check(!s.SetColumnWidth(0,double.NaN)&&!s.SetRowHeight(1,500),"bad dimensions refused");s.SetFrozenColumns(1);
+             var format=new CellFormat(FontFamily:"Consolas",FontSize:14,Bold:true,Italic:true,Foreground:"#123456",Background:"#ABCDEF",
+-- 
+2.53.0
