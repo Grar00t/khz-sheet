@@ -18,7 +18,7 @@ $Receipt = [ordered]@{
     schema = 1; platform = "Windows"; startedUtc = [DateTime]::UtcNow.ToString("o")
     baseCommit = (git rev-parse HEAD); sourceManifestSha256 = $null
     compilerWarnings = 0; native = $null; managedRunners = 7
-    managedTestDiscovery = "Console assertion runners: dotnet run executes checks; dotnet test discovers no test-framework cases."
+    managedTestDiscovery = "MSTest discovery gate executes all seven console assertion runners as discovered test cases."
     steps = $Steps; success = $false
 }
 function Save-Receipt {
@@ -67,11 +67,12 @@ try {
     Copy-Item $dll (Join-Path $output "khz_sheet.dll") -Force
     $env:PATH = (Split-Path -Parent $dll) + ";" + $OriginalPath
     $env:KHZ_TEST_ARTIFACTS = Join-Path $Evidence "ui"
+    $env:KHZ_REPO_ROOT = $RepoRoot
     foreach ($project in @("KhzExactLiteral","KhzFormulaCells","KhzDependencyRewrite","KhzOpcPackage","KhzDesktopContracts","KhzBoundaryContracts","KhzSubsystemContracts")) {
         $path = "tests/dotnet/$project/$project.csproj"
         Invoke-Check $project "dotnet" @("run","--project",$path,"-c","Release")
-        Invoke-Check ($project+"-dotnet-test") "dotnet" @("test",$path,"-c","Release","--no-restore")
     }
+    Invoke-Check "managed-test-discovery" "dotnet" @("test","tests/dotnet/KhzManagedRunnerTests/KhzManagedRunnerTests.csproj","-c","Release","--logger","console;verbosity=normal")
     Invoke-Check "boundary-race" "dotnet" @("run","--project","tests/dotnet/KhzBoundaryContracts/KhzBoundaryContracts.csproj","-c","Release","--no-build","--","race",$dll)
     Invoke-Check "boundary-bad-image" "dotnet" @("run","--project","tests/dotnet/KhzBoundaryContracts/KhzBoundaryContracts.csproj","-c","Release","--no-build","--","bad-image")
     if ($WithPresentationOracle) {
