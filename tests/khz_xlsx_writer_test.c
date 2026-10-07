@@ -27,6 +27,40 @@ static void fail(const char *what)
     ++failures;
 }
 
+static FILE *open_file(const char *path, const char *mode)
+{
+    FILE *file = NULL;
+#if defined(_MSC_VER)
+    if (fopen_s(&file, path, mode) != 0) file = NULL;
+#else
+    file = fopen(path, mode);
+#endif
+    return file;
+}
+
+static int write_exact_file(const char *path, const unsigned char *bytes, size_t length)
+{
+    FILE *file = open_file(path, "wb");
+    int ok;
+    if (file == NULL) return 0;
+    ok = fwrite(bytes, (size_t)1, length, file) == length && fclose(file) == 0;
+    return ok;
+}
+
+static int file_equals(const char *path, const unsigned char *bytes, size_t length)
+{
+    unsigned char buffer[32];
+    FILE *file;
+    size_t got;
+
+    if (length > sizeof buffer) return 0;
+    file = open_file(path, "rb");
+    if (file == NULL) return 0;
+    got = fread(buffer, (size_t)1, sizeof buffer, file);
+    if (fclose(file) != 0) return 0;
+    return got == length && memcmp(buffer, bytes, length) == 0;
+}
+
 static int validate_zip_directory(const unsigned char *bytes, size_t length)
 {
     size_t eocd;
@@ -78,6 +112,7 @@ int main(void)
     KhzArena scratch_a;
     KhzArena scratch_b;
     KhzArena reader_arena;
+    KhzArena write_arena;
     KhzXlsxReader reader;
     KhzRational third;
     KhzRational tiny;
@@ -149,6 +184,51 @@ int main(void)
         }
         khz_sheet_destroy(&roundtrip);
         khz_arena_destroy(&reader_arena);
+    }
+
+    {
+        static const char target[] = "khz_xlsx_atomic_test.xlsx";
+        static const char stage[] = "khz_xlsx_atomic_test.xlsx.khz.tmp";
+        static const unsigned char sentinel[] = "ORIGINAL";
+        static const unsigned char blocker[] = "BLOCK";
+
+        (void)remove(target);
+        (void)remove(stage);
+
+        if (!write_exact_file(target, sentinel, sizeof sentinel - (size_t)1)
+            || !write_exact_file(stage, blocker, sizeof blocker - (size_t)1)) {
+            fail("atomic writer fixtures");
+        } else if (khz_arena_init(&write_arena, (size_t)8 << 20) != KHZ_ARENA_OK) {
+            fail("atomic writer arena");
+        } else {
+            status = khz_xlsx_write(&sheet, &write_arena, target, "Audit", NULL);
+            if (status != KHZ_SHEET_ERR_OS) fail("stage collision must fail");
+            if (!file_equals(target, sentinel, sizeof sentinel - (size_t)1)) {
+                fail("failed staged write preserves original");
+            }
+
+            (void)remove(stage);
+            status = khz_xlsx_write(&sheet, &write_arena, target, "Audit", NULL);
+            if (status != KHZ_SHEET_OK) {
+                fail("staged write succeeds");
+            } else {
+                static const unsigned char zip_magic[] = { 'P', 'K', 3u, 4u };
+                FILE *file = open_file(target, "rb");
+                unsigned char prefix[sizeof zip_magic];
+                size_t got = (size_t)0;
+                if (file != NULL) {
+                    got = fread(prefix, (size_t)1, sizeof prefix, file);
+                    if (fclose(file) != 0) got = (size_t)0;
+                }
+                if (got != sizeof prefix || memcmp(prefix, zip_magic, sizeof prefix) != 0) {
+                    fail("staged write publishes xlsx zip");
+                }
+            }
+            khz_arena_destroy(&write_arena);
+        }
+
+        (void)remove(stage);
+        (void)remove(target);
     }
 
     khz_arena_destroy(&scratch_b);
