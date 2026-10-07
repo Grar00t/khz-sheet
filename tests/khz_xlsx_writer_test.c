@@ -41,10 +41,12 @@ static FILE *open_file(const char *path, const char *mode)
 static int write_exact_file(const char *path, const unsigned char *bytes, size_t length)
 {
     FILE *file = open_file(path, "wb");
-    int ok;
+    size_t written;
+    int close_status;
     if (file == NULL) return 0;
-    ok = fwrite(bytes, (size_t)1, length, file) == length && fclose(file) == 0;
-    return ok;
+    written = fwrite(bytes, (size_t)1, length, file);
+    close_status = fclose(file);
+    return written == length && close_status == 0;
 }
 
 static int file_equals(const char *path, const unsigned char *bytes, size_t length)
