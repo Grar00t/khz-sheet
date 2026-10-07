@@ -68,6 +68,13 @@ typedef struct KhzXlsxReport {
    it cannot supply what the parts need the result is KHZ_SHEET_ERR_MEMORY and
    no file is created; there is no heap fallback and no partial file.
 
+   Filesystem publication is staged in the destination directory as
+   path + ".khz.tmp". The stage is created exclusively, fully written and
+   closed before it replaces path. A stale or concurrent stage therefore
+   returns KHZ_SHEET_ERR_OS without truncating the existing destination.
+   This protects replacement atomicity; it is not a power-loss durability
+   guarantee for the containing filesystem.
+
    report is optional.
 
    Statuses:
