@@ -333,3 +333,12 @@ if(KHZ_BUILD_TESTS)
     target_link_libraries(khz_formula_extended_test PRIVATE khz_sheet)
     add_test(NAME khz_formula_extended_test COMMAND khz_formula_extended_test)
 endif()
+
+# Sovereign acceptance is a bounded native-only capability check.
+# It does not attest to a GUI framerate or a whole-application egress policy.
+if(KHZ_BUILD_TESTS)
+    add_executable(khz_sovereign_scale_test tests/khz_sovereign_scale_test.c)
+    target_link_libraries(khz_sovereign_scale_test PRIVATE khz_sheet)
+    add_test(NAME khz_sovereign_scale_test COMMAND khz_sovereign_scale_test)
+    set_tests_properties(khz_sovereign_scale_test PROPERTIES TIMEOUT 90)
+endif()

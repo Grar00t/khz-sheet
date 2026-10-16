@@ -14,6 +14,15 @@ Local-first spreadsheet engine with a C11 native core, exact representable ratio
 | Tables/charts | semantic ranges, exact SUM totals, coordinate-safe sort views; single-series Bar/Column/Line models, WPF rendering and XLSX parts | managed round-trip and actual WPF interaction tests; see TABLES.md and CHARTS.md |
 | Localization | English controls; Unicode cell strings | complete localization/RTL workflows remain unverified |
 
+## Sovereign acceptance (experimental, NOT production approval)
+The bounded, native-only 100,000-row by 1,000-column sparse-address
+test exercises 100,000 populated synthetic cells, explicit capacity
+rejection and proof-ring retention. An optional Linux strace command
+checks for network-category syscalls in that **one native test process**.
+It does not verify 60 FPS, WebView2/WPF/Tauri traffic or PDPL/ECC
+compliance. See [SOVEREIGN-ACCEPTANCE](docs/SOVEREIGN-ACCEPTANCE.md)
+and [local gate receipt](evidence/20261016-sovereign-native-gate.json).
+
 ## Build and test
 ```sh
 cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release

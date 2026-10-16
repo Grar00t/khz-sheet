@@ -1,0 +1,42 @@
+{
+  "project": "KHZ Sheet / SovereignSpreadsheetEngine exploratory acceptance",
+  "base_commit": "0e616ac56fcb6c26fefe7e3ce57398f25f158878",
+  "date_utc": "2026-10-16",
+  "environment": {
+    "os": "WSL Ubuntu x86_64",
+    "compiler": "GCC 15.2.0",
+    "build_type": "Release",
+    "ledger": "disabled explicitly",
+    "test_type": "native C11 acceptance smoke"
+  },
+  "run": {
+    "rows_virtual": 100000,
+    "columns_virtual": 1000,
+    "virtual_positions": 100000000,
+    "populated_cells": 100000,
+    "arena_reserved_bytes": 134217728,
+    "arena_used_bytes": 25534336,
+    "commit_entries_verified": 65536,
+    "older_commit_entries_dropped": 34464,
+    "capacity_rejection_count": 1,
+    "native_ctest": "PASS",
+    "native_ctest_elapsed_seconds_approx": 0.14,
+    "native_suite_passed": 18,
+    "native_suite_total": 18,
+    "strace_network_category_syscalls_observed": 0,
+    "debug_asan_ubsan_test": "PASS 1/1",
+    "debug_asan_ubsan_elapsed_seconds_approx": 1.58
+  },
+  "assertion_scope": {
+    "addresses_not_full_matrix": true,
+    "network_observation_scope": "only Linux native acceptance test executable",
+    "telemetry_zero_whole_application": "NOT_VERIFIED",
+    "windows_rendering_fps": "NOT_MEASURED",
+    "pdpl": "NOT_ESTABLISHED",
+    "nca_ecc": "NOT_ESTABLISHED",
+    "burp_dast": "NOT_RUN",
+    "production": "NOT_READY",
+    "real_user_benefit": "UNMEASURED"
+  },
+  "evidence_quality": "single host single build one run; measured only bounded native core claims"
+}
