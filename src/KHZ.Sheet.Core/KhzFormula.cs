@@ -85,7 +85,7 @@ namespace KHZ.Sheet.Core
 
 	internal static unsafe class KhzNativeFormula
 	{
-		internal const string Lib = "khz_sheet";
+		internal const string Lib = "khzcore";
 
 		/// <summary>
 		/// Size of the stack window reserved for a KhzFormula control block.

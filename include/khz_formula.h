@@ -10,6 +10,8 @@
 #include "khz_rational.h"
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -212,15 +214,15 @@ typedef struct KhzFormulaResult {
 
 /* Takes an arena mark. khz_formula_abandon returns every node to the arena;
    a formula that is kept alive must not be abandoned. */
-KhzSheetStatus khz_formula_begin(KhzFormula *formula, KhzArena *arena,
+KHZ_API KhzSheetStatus khz_formula_begin(KhzFormula *formula, KhzArena *arena,
                                  uint32_t col, uint32_t row);
-void khz_formula_abandon(KhzFormula *formula);
+KHZ_API void khz_formula_abandon(KhzFormula *formula);
 
-KhzSheetStatus khz_formula_const(KhzFormula *formula, KhzRational value,
+KHZ_API KhzSheetStatus khz_formula_const(KhzFormula *formula, KhzRational value,
                                  KhzFormulaNode **out);
-KhzSheetStatus khz_formula_ref(KhzFormula *formula, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_formula_ref(KhzFormula *formula, uint32_t col, uint32_t row,
                                KhzFormulaNode **out);
-KhzSheetStatus khz_formula_range(KhzFormula *formula,
+KHZ_API KhzSheetStatus khz_formula_range(KhzFormula *formula,
                                  uint32_t col0, uint32_t row0,
                                  uint32_t col1, uint32_t row1,
                                  KhzFormulaNode **out);
@@ -229,11 +231,11 @@ KhzSheetStatus khz_formula_range(KhzFormula *formula,
    call. Arity is checked against the operation: DIV with three children is
    refused rather than silently ignoring the third. POW is binary and is
    checked the same way. */
-KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
+KHZ_API KhzSheetStatus khz_formula_node(KhzFormula *formula, KhzFormulaOp op,
                                 KhzFormulaNode *const *children,
                                 size_t child_count, KhzFormulaNode **out);
 
-KhzSheetStatus khz_formula_set_root(KhzFormula *formula, KhzFormulaNode *root);
+KHZ_API KhzSheetStatus khz_formula_set_root(KhzFormula *formula, KhzFormulaNode *root);
 
 /* ------------------------------ parsing ------------------------------- */
 
@@ -256,7 +258,7 @@ KhzSheetStatus khz_formula_set_root(KhzFormula *formula, KhzFormulaNode *root);
    deliberate; see the POW block above.
 
    error may be NULL. On failure the arena is rewound to the entry mark. */
-KhzSheetStatus khz_formula_parse(KhzFormula *formula, KhzArena *arena,
+KHZ_API KhzSheetStatus khz_formula_parse(KhzFormula *formula, KhzArena *arena,
                                  uint32_t col, uint32_t row,
                                  const char *source, size_t len,
                                  KhzFormulaParseError *error);
@@ -264,21 +266,21 @@ KhzSheetStatus khz_formula_parse(KhzFormula *formula, KhzArena *arena,
 /* A1 reference text to zero-based coordinates. Absolute markers are accepted
    and ignored: $A$1 and A1 name the same cell, and this engine has no copy
    operation yet for the distinction to matter to. */
-KhzSheetStatus khz_formula_parse_ref(const char *text, size_t len,
+KHZ_API KhzSheetStatus khz_formula_parse_ref(const char *text, size_t len,
                                      uint32_t *col, uint32_t *row);
 
 /* -------------------------- evaluation -------------------------------- */
 
 /* Evaluates against the sheet's current cell values. Reads only; no cell is
    written and the chain head does not move. */
-KhzSheetStatus khz_formula_eval(struct KhzSheet *sheet, const KhzFormula *formula,
+KHZ_API KhzSheetStatus khz_formula_eval(struct KhzSheet *sheet, const KhzFormula *formula,
                                 KhzFormulaResult *out);
 
 /* As above, but a spreadsheet error is returned as its status code rather than
    converted into a value: #DIV/0! becomes KHZ_SHEET_ERR_DIVZERO, a text operand
    becomes KHZ_SHEET_ERR_TYPE, and an unrepresentable result (including a
    non-integer exponent) becomes KHZ_SHEET_ERR_OVERFLOW. */
-KhzSheetStatus khz_formula_eval_strict(struct KhzSheet *sheet,
+KHZ_API KhzSheetStatus khz_formula_eval_strict(struct KhzSheet *sheet,
                                        const KhzFormula *formula,
                                        KhzRational *out);
 
@@ -287,14 +289,14 @@ KhzSheetStatus khz_formula_eval_strict(struct KhzSheet *sheet,
    into concrete edges for cells that currently exist; later cells entering the
    region are linked by range sync. *declared is the number of logical REF/RANGE
    declarations and may be NULL. */
-KhzSheetStatus khz_formula_declare_dependencies(struct KhzSheet *sheet,
+KHZ_API KhzSheetStatus khz_formula_declare_dependencies(struct KhzSheet *sheet,
                                                 const KhzFormula *formula,
                                                 uint64_t *declared);
 
 /* Parse, store the source on the cell through khz_sheet_set_formula, and
    declare dependencies, as one operation. Nothing is committed if any step
    fails. */
-KhzSheetStatus khz_formula_set(struct KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_formula_set(struct KhzSheet *sheet, uint32_t col, uint32_t row,
                                const char *source, size_t len,
                                KhzFormulaParseError *error);
 
@@ -305,10 +307,12 @@ KhzSheetStatus khz_formula_set(struct KhzSheet *sheet, uint32_t col, uint32_t ro
    A circular reference is KHZ_SHEET_ERR_CYCLE and nothing is written: the
    cycle is reported, never broken at an arbitrary edge to force progress.
 
-   *evaluated receives the number of formula cells recomputed and may be NULL. */
-KhzSheetStatus khz_formula_recalc(struct KhzSheet *sheet, uint64_t *evaluated);
+   *evaluated receives the number of formula cells committed, including on
+   partial failure, and may be NULL. An engine failure after earlier successful
+   evaluations does not roll those commits back. */
+KHZ_API KhzSheetStatus khz_formula_recalc(struct KhzSheet *sheet, uint64_t *evaluated);
 
-const char *khz_formula_op_name(KhzFormulaOp op);
+KHZ_API const char *khz_formula_op_name(KhzFormulaOp op);
 
 #ifdef __cplusplus
 }

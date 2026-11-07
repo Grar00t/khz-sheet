@@ -6,6 +6,8 @@
 
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -55,9 +57,9 @@ typedef struct KhzAbiSizes {
 
 /* Fills *out with the sizes and offsets this build actually compiled. The
    caller compares them against its own mirrored declarations. */
-KhzSheetStatus khz_abi_sizes(KhzAbiSizes *out);
+KHZ_API KhzSheetStatus khz_abi_sizes(KhzAbiSizes *out);
 
-uint32_t khz_abi_version(void);
+KHZ_API uint32_t khz_abi_version(void);
 
 /* Byte offsets of the KhzSheet members, reported by the compiler that built
    this library.
@@ -79,15 +81,23 @@ uint32_t khz_abi_version(void);
    A C caller does not need any of this - KhzSheet is a complete type in
    khz_sheet.h, so &sheet->grid is already available and is the right way to
    do it there. */
-size_t khz_abi_arena_offset(void);
-size_t khz_abi_grid_offset(void);
-size_t khz_abi_dep_graph_offset(void);
-size_t khz_abi_proof_offset(void);
-size_t khz_abi_commit_log_offset(void);
+KHZ_API size_t khz_abi_arena_offset(void);
+KHZ_API size_t khz_abi_grid_offset(void);
+KHZ_API size_t khz_abi_dep_graph_offset(void);
+KHZ_API size_t khz_abi_proof_offset(void);
+KHZ_API size_t khz_abi_commit_log_offset(void);
 
 /* sizeof(KhzSheet), so a managed caller can allocate a sheet control block
    without mirroring the struct at all. */
-size_t khz_abi_sheet_bytes(void);
+KHZ_API size_t khz_abi_sheet_bytes(void);
+
+/* Additive ABI queries: no public structure layout is changed. */
+KHZ_API size_t khz_abi_sheet_alignment(void);
+KHZ_API size_t khz_abi_cell_field_offset(uint32_t field);
+KHZ_API size_t khz_abi_parse_error_bytes(void);
+KHZ_API size_t khz_abi_chain_audit_bytes(void);
+KHZ_API size_t khz_abi_xlsx_report_bytes(void);
+
 
 /* sizeof(KhzDepEdge) and sizeof(KhzDepRangeEdge), reported by the compiler.
 
@@ -97,8 +107,8 @@ size_t khz_abi_sheet_bytes(void);
    so these are here for the version gate to assert against rather than for
    allocation. If a future phase changes the rectangle representation without
    bumping KHZ_ABI_VERSION, a gate that checks this number will catch it. */
-size_t khz_abi_dep_edge_bytes(void);
-size_t khz_abi_dep_range_edge_bytes(void);
+KHZ_API size_t khz_abi_dep_edge_bytes(void);
+KHZ_API size_t khz_abi_dep_range_edge_bytes(void);
 
 /* sizeof(KhzFormula) and sizeof(KhzFormulaNode), reported by the compiler.
 
@@ -110,28 +120,28 @@ size_t khz_abi_dep_range_edge_bytes(void);
    write past the block and corrupt whatever followed it, and nothing would
    report it. These functions replace the guess with the number the compiler
    used. */
-size_t khz_abi_formula_bytes(void);
-size_t khz_abi_formula_node_bytes(void);
+KHZ_API size_t khz_abi_formula_bytes(void);
+KHZ_API size_t khz_abi_formula_node_bytes(void);
 
 /* 1 when the library was built with the AVX2 or NEON kernel compiled in, 0
    for the scalar build. Reported rather than inferred from the host CPU: what
    matters is what was compiled, not what the machine could have run. */
-int khz_abi_simd_compiled(void);
+KHZ_API int khz_abi_simd_compiled(void);
 
 /* 1 when this build contains the SQLite ledger, 0 when it was configured
    out. A managed caller must not call the ledger entry points when this
    returns 0. */
-int khz_abi_ledger_compiled(void);
+KHZ_API int khz_abi_ledger_compiled(void);
 
 /* 1 when this build contains the xlsx writer. */
-int khz_abi_xlsx_compiled(void);
+KHZ_API int khz_abi_xlsx_compiled(void);
 
 /* 1 when this build contains the xlsx reader. */
-int khz_abi_xlsx_reader_compiled(void);
+KHZ_API int khz_abi_xlsx_reader_compiled(void);
 
 /* 1 when this build resolves range references as retroactive region edges
    rather than as one edge per cell that existed at declaration time. */
-int khz_abi_range_edges_compiled(void);
+KHZ_API int khz_abi_range_edges_compiled(void);
 
 #ifdef __cplusplus
 }

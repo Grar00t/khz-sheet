@@ -36,7 +36,7 @@ namespace KHZ.Sheet.Core
 	/// </summary>
 	internal static class KhzAbiNative
 	{
-		internal const string Lib = "khz_sheet";
+		internal const string Lib = "khzcore";
 
 		[DllImport(Lib, EntryPoint = "khz_abi_dep_edge_bytes",
 			CallingConvention = CallingConvention.Cdecl)]

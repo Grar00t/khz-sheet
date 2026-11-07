@@ -8,6 +8,8 @@
 #include "khz_cell.h"
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -55,24 +57,24 @@ typedef struct KhzGrid {
 /* cell_capacity must be in 1..KHZ_GRID_MAX_CELLS. The slot table is sized to
    the next power of two at or above 2 * cell_capacity, so the load factor
    never exceeds 0.5 and linear probing stays short. */
-KhzSheetStatus khz_grid_init(KhzGrid *grid, KhzArena *arena, size_t cell_capacity);
+KHZ_API KhzSheetStatus khz_grid_init(KhzGrid *grid, KhzArena *arena, size_t cell_capacity);
 
 /* Finds the cell, or creates an EMPTY one at that coordinate. index and cell
    are both optional. */
-KhzSheetStatus khz_grid_upsert(KhzGrid *grid, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_grid_upsert(KhzGrid *grid, uint32_t col, uint32_t row,
                                size_t *index, KhzCell **cell);
 
 /* KHZ_SHEET_ERR_MISSING when the coordinate has no cell. */
-KhzSheetStatus khz_grid_find(const KhzGrid *grid, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_grid_find(const KhzGrid *grid, uint32_t col, uint32_t row,
                              size_t *index, KhzCell **cell);
 
-size_t   khz_grid_count(const KhzGrid *grid);
-size_t   khz_grid_capacity(const KhzGrid *grid);
-uint64_t khz_grid_probes(const KhzGrid *grid);
-uint64_t khz_grid_rejections(const KhzGrid *grid);
+KHZ_API size_t   khz_grid_count(const KhzGrid *grid);
+KHZ_API size_t   khz_grid_capacity(const KhzGrid *grid);
+KHZ_API uint64_t khz_grid_probes(const KhzGrid *grid);
+KHZ_API uint64_t khz_grid_rejections(const KhzGrid *grid);
 
 /* Dense iteration in insertion order. index must be below khz_grid_count. */
-KhzSheetStatus khz_grid_cell_at(const KhzGrid *grid, size_t index, KhzCell **cell);
+KHZ_API KhzSheetStatus khz_grid_cell_at(const KhzGrid *grid, size_t index, KhzCell **cell);
 
 /* ---------------------------------------------------------------------- */
 
@@ -133,12 +135,12 @@ typedef struct KhzDepGraph {
     uint64_t          range_links; /* concrete edges materialised from regions */
 } KhzDepGraph;
 
-KhzSheetStatus khz_dep_init(KhzDepGraph *graph, KhzArena *arena, KhzGrid *grid);
+KHZ_API KhzSheetStatus khz_dep_init(KhzDepGraph *graph, KhzArena *arena, KhzGrid *grid);
 
 /* Both endpoints are upserted, so an edge may be declared before either cell
    has a value. A duplicate edge is added again and counted again; the topo
    order is unaffected because indegree and edge count move together. */
-KhzSheetStatus khz_dep_add_edge(KhzDepGraph *graph,
+KHZ_API KhzSheetStatus khz_dep_add_edge(KhzDepGraph *graph,
                                uint32_t from_col, uint32_t from_row,
                                uint32_t to_col, uint32_t to_row);
 
@@ -152,7 +154,7 @@ KhzSheetStatus khz_dep_add_edge(KhzDepGraph *graph,
 
    Note that this deliberately does not replace khz_dep_add_edge. A single
    cell reference is still a single edge, with no region to re-scan. */
-KhzSheetStatus khz_dep_add_range_edge(KhzDepGraph *graph,
+KHZ_API KhzSheetStatus khz_dep_add_range_edge(KhzDepGraph *graph,
                                      uint32_t col1, uint32_t row1,
                                      uint32_t col2, uint32_t row2,
                                      uint32_t to_col, uint32_t to_row);
@@ -162,10 +164,10 @@ KhzSheetStatus khz_dep_add_range_edge(KhzDepGraph *graph,
    created in between adds nothing. khz_dep_topo calls it, so ordinary
    recalculation never has to. Call it directly only when the indegree array
    is being inspected without a topological sort. */
-KhzSheetStatus khz_dep_range_sync(KhzDepGraph *graph);
+KHZ_API KhzSheetStatus khz_dep_range_sync(KhzDepGraph *graph);
 
 /* 1 when the coordinate falls inside the rectangle. */
-int khz_dep_rect_contains(const KhzDepRect *rect, uint32_t col, uint32_t row);
+KHZ_API int khz_dep_rect_contains(const KhzDepRect *rect, uint32_t col, uint32_t row);
 
 /* Kahn's algorithm over the cells that currently exist. order receives cell
    indices in evaluation order and must hold at least khz_grid_count entries.
@@ -178,12 +180,12 @@ int khz_dep_rect_contains(const KhzDepRect *rect, uint32_t col, uint32_t row);
 
    Scratch memory is taken from the arena between a mark and a release, so the
    call leaves the arena offset exactly where it found it. */
-KhzSheetStatus khz_dep_topo(KhzDepGraph *graph, size_t *order, size_t capacity,
+KHZ_API KhzSheetStatus khz_dep_topo(KhzDepGraph *graph, size_t *order, size_t capacity,
                             size_t *count);
 
-uint64_t khz_dep_edge_count(const KhzDepGraph *graph);
-uint64_t khz_dep_range_count(const KhzDepGraph *graph);
-uint64_t khz_dep_range_links(const KhzDepGraph *graph);
+KHZ_API uint64_t khz_dep_edge_count(const KhzDepGraph *graph);
+KHZ_API uint64_t khz_dep_range_count(const KhzDepGraph *graph);
+KHZ_API uint64_t khz_dep_range_links(const KhzDepGraph *graph);
 
 #ifdef __cplusplus
 }

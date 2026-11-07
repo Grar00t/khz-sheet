@@ -8,6 +8,8 @@
 #include "khz_rational.h"
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -74,17 +76,17 @@ typedef struct KhzCell {
 _Static_assert(sizeof(KhzCell) <= 128, "KhzCell must stay within two cache lines");
 _Static_assert(sizeof(KhzCell) % 8 == 0, "KhzCell must be word sized");
 
-uint64_t khz_cell_key(uint32_t col, uint32_t row);
-KhzSheetStatus khz_cell_key_split(uint64_t key, uint32_t *col, uint32_t *row);
+KHZ_API uint64_t khz_cell_key(uint32_t col, uint32_t row);
+KHZ_API KhzSheetStatus khz_cell_key_split(uint64_t key, uint32_t *col, uint32_t *row);
 
-KhzSheetStatus khz_cell_init_empty(KhzCell *cell, uint32_t col, uint32_t row);
+KHZ_API KhzSheetStatus khz_cell_init_empty(KhzCell *cell, uint32_t col, uint32_t row);
 
-KhzSheetStatus khz_cell_set_empty(KhzCell *cell);
-KhzSheetStatus khz_cell_set_rational(KhzCell *cell, KhzRational value);
-KhzSheetStatus khz_cell_set_text(KhzCell *cell, const char *text, uint32_t len);
-KhzSheetStatus khz_cell_set_bool(KhzCell *cell, int value);
-KhzSheetStatus khz_cell_set_error(KhzCell *cell, KhzCellError error);
-KhzSheetStatus khz_cell_set_formula(KhzCell *cell, const char *formula, uint32_t len);
+KHZ_API KhzSheetStatus khz_cell_set_empty(KhzCell *cell);
+KHZ_API KhzSheetStatus khz_cell_set_rational(KhzCell *cell, KhzRational value);
+KHZ_API KhzSheetStatus khz_cell_set_text(KhzCell *cell, const char *text, uint32_t len);
+KHZ_API KhzSheetStatus khz_cell_set_bool(KhzCell *cell, int value);
+KHZ_API KhzSheetStatus khz_cell_set_error(KhzCell *cell, KhzCellError error);
+KHZ_API KhzSheetStatus khz_cell_set_formula(KhzCell *cell, const char *formula, uint32_t len);
 
 /* Digest of this cell's committed semantic state chained onto prev.
 
@@ -97,18 +99,18 @@ KhzSheetStatus khz_cell_set_formula(KhzCell *cell, const char *formula, uint32_t
    evaluation-cache state and is intentionally omitted. The lengths precede
    variable-length fields, so no pair of distinct cells shares a pre-image by
    concatenation. */
-KhzSheetStatus khz_cell_digest(const KhzCell *cell,
+KHZ_API KhzSheetStatus khz_cell_digest(const KhzCell *cell,
                                const unsigned char prev[KHZ_SHA256_DIGEST_BYTES],
                                unsigned char out[KHZ_SHA256_DIGEST_BYTES]);
 
-KhzSheetStatus khz_cell_commit(KhzCell *cell,
+KHZ_API KhzSheetStatus khz_cell_commit(KhzCell *cell,
                                const unsigned char prev[KHZ_SHA256_DIGEST_BYTES]);
 
-KhzSheetStatus khz_cell_verify(const KhzCell *cell,
+KHZ_API KhzSheetStatus khz_cell_verify(const KhzCell *cell,
                                const unsigned char prev[KHZ_SHA256_DIGEST_BYTES]);
 
-const char *khz_cell_kind_name(KhzCellKind kind);
-const char *khz_cell_error_name(KhzCellError error);
+KHZ_API const char *khz_cell_kind_name(KhzCellKind kind);
+KHZ_API const char *khz_cell_error_name(KhzCellError error);
 
 #ifdef __cplusplus
 }

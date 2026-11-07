@@ -44,6 +44,8 @@
 #include "khz_sheet.h"
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -108,37 +110,37 @@ typedef struct KhzXlsxReader {
 	int loaded;
 } KhzXlsxReader;
 
-KhzSheetStatus khz_xlsx_reader_init(KhzXlsxReader *reader, KhzArena *arena);
-KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, size_t size);
-KhzSheetStatus khz_xlsx_reader_find(const KhzXlsxReader *reader, const char *name,
+KHZ_API KhzSheetStatus khz_xlsx_reader_init(KhzXlsxReader *reader, KhzArena *arena);
+KHZ_API KhzSheetStatus khz_xlsx_reader_load(KhzXlsxReader *reader, const void *bytes, size_t size);
+KHZ_API KhzSheetStatus khz_xlsx_reader_find(const KhzXlsxReader *reader, const char *name,
                                     const KhzXlsxEntry **entry);
-KhzSheetStatus khz_xlsx_reader_check_package(KhzXlsxReader *reader);
-KhzSheetStatus khz_xlsx_reader_shared_strings(KhzXlsxReader *reader);
+KHZ_API KhzSheetStatus khz_xlsx_reader_check_package(KhzXlsxReader *reader);
+KHZ_API KhzSheetStatus khz_xlsx_reader_shared_strings(KhzXlsxReader *reader);
 
 /* Parses one worksheet into `sheet` through ordinary setters so loaded cells
  * join the normal proof chain. If reader and sheet share the same arena, this
  * call makes the reader's load non-releasable: reset then returns ERR_STATE to
  * protect those live payloads. */
-KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *sheet,
+KHZ_API KhzSheetStatus khz_xlsx_reader_parse_sheet(KhzXlsxReader *reader, KhzSheet *sheet,
                                            const char *part_name);
 
 /* Convenience path for the first workbook sheet. The worksheet part is
  * resolved from workbook.xml's r:id through xl/_rels/workbook.xml.rels rather
  * than guessed from a conventional filename. External relationship targets,
  * unsafe path forms and missing relationship records are refused. */
-KhzSheetStatus khz_xlsx_reader_read(KhzXlsxReader *reader, KhzSheet *sheet,
+KHZ_API KhzSheetStatus khz_xlsx_reader_read(KhzXlsxReader *reader, KhzSheet *sheet,
                                     const void *bytes, size_t size);
 
 /* Releases reader allocations when the reader arena is independent scratch
  * storage. Returns KHZ_SHEET_ERR_STATE without rewinding when a live imported
  * sheet shares that arena. */
-KhzSheetStatus khz_xlsx_reader_reset(KhzXlsxReader *reader);
+KHZ_API KhzSheetStatus khz_xlsx_reader_reset(KhzXlsxReader *reader);
 
-KhzSheetStatus khz_xlsx_reader_report(const KhzXlsxReader *reader, KhzXlsxReadReport *out);
-size_t khz_xlsx_reader_entry_count(const KhzXlsxReader *reader);
-KhzSheetStatus khz_xlsx_reader_parse_ref(const char *text, size_t len,
+KHZ_API KhzSheetStatus khz_xlsx_reader_report(const KhzXlsxReader *reader, KhzXlsxReadReport *out);
+KHZ_API size_t khz_xlsx_reader_entry_count(const KhzXlsxReader *reader);
+KHZ_API KhzSheetStatus khz_xlsx_reader_parse_ref(const char *text, size_t len,
                                          uint32_t *col, uint32_t *row);
-uint32_t khz_xlsx_reader_crc32(const unsigned char *data, size_t len);
+KHZ_API uint32_t khz_xlsx_reader_crc32(const unsigned char *data, size_t len);
 
 #ifdef __cplusplus
 }

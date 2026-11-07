@@ -81,7 +81,7 @@ public sealed partial class WorksheetSession : IDisposable
     private readonly List<TableFormat> _tableFormats = new();
     private readonly Stack<WorksheetEdit> _undo = new();
     private readonly Stack<WorksheetEdit> _redo = new();
-    private NativeSheet? _native;
+    private NativeSheetSession? _native;
     private bool _disposed;
 
     private abstract record WorksheetEdit;
@@ -97,7 +97,7 @@ public sealed partial class WorksheetSession : IDisposable
 
         try
         {
-            EngineStatus = NativeSheet.TryCreate(ArenaBytes, CellCapacity, out _native);
+            EngineStatus = NativeSheetSession.TryCreate(ArenaBytes, CellCapacity, out _native);
         }
         catch (DllNotFoundException)
         {
@@ -119,7 +119,7 @@ public sealed partial class WorksheetSession : IDisposable
 
     public SheetStatus EngineStatus { get; private set; }
 
-    public bool EngineAvailable => EngineStatus == SheetStatus.Ok && _native is not null;
+    public bool EngineAvailable => !_disposed && EngineStatus == SheetStatus.Ok && _native is not null;
 
     public nuint NativeCellCount => _native?.CellCount ?? 0;
 
@@ -128,7 +128,7 @@ public sealed partial class WorksheetSession : IDisposable
     public string EngineSummary =>
         EngineAvailable
             ? $"native · exact · cells {NativeCellCount:N0} · commits {NativeCommits:N0}"
-            : $"managed view · {SheetStatusText.Name(EngineStatus)}";
+            : $"native unavailable · {SheetStatusText.Name(EngineStatus)}";
 
     public string GetInput(int row, int column)
     {
@@ -173,10 +173,8 @@ public sealed partial class WorksheetSession : IDisposable
 
         if (!EngineAvailable)
         {
-            _inputs[Key(row, column)] = raw;
-            Grid.Rows[row][column] = raw;
             message = EngineSummary;
-            return true;
+            return false;
         }
 
         SheetStatus status;
@@ -196,7 +194,7 @@ public sealed partial class WorksheetSession : IDisposable
             {
                 _inputs[Key(row,column)] = raw;
                 Grid.Rows[row][column] = raw;
-                message = "stored · recalculation " + SheetStatusText.Name(status);
+                message = $"stored; recalculation failed after {evaluated:N0} evaluated cells: {SheetStatusText.Name(status)}";
                 return true;
             }
         }
@@ -214,7 +212,7 @@ public sealed partial class WorksheetSession : IDisposable
             {
                 _inputs[Key(row, column)] = raw;
                 RefreshComputedCells();
-                message = "stored · recalculation " + SheetStatusText.Name(status);
+                message = $"stored; recalculation failed after {evaluated:N0} evaluated cells: {SheetStatusText.Name(status)}";
                 return true;
             }
         }
@@ -375,7 +373,11 @@ public sealed partial class WorksheetSession : IDisposable
 
         int columns = Grid.Columns.Count;
         int total = Grid.Rows.Count * columns;
-        int start = startRow >= 0 && startColumn >= 0
+        // Invalid caller coordinates are treated as "search from start".
+        // Without bounds checks, large values overflow int and create a
+        // negative index into the data grid.
+        int start = startRow >= 0 && startRow < Grid.Rows.Count &&
+                    startColumn >= 0 && startColumn < columns
             ? ((startRow * columns + startColumn + 1) % total)
             : 0;
 
@@ -424,6 +426,14 @@ public sealed partial class WorksheetSession : IDisposable
                 return ApplyObjectHistory(obj, undo, out message);
             case TableTotalsEdit totals:
                 return ApplyTotalsHistory(totals, undo, out message);
+            case BulkCellsEdit bulk:
+                if (!StageValues(bulk.Cells, undo, out WorksheetSession? staged, out message))
+                    return false;
+                using (staged) AdoptValues(staged!);
+                foreach (int row in bulk.Cells.Select(c => c.Row).Distinct())
+                    UpdateTableHeaders(row);
+                message = $"{(undo ? "undo" : "redo")} paste · {bulk.Cells.Count:N0} cells";
+                return true;
             default:
                 message = "unknown history entry";
                 return false;
@@ -441,7 +451,8 @@ public sealed partial class WorksheetSession : IDisposable
         SheetStatus status = _native!.TryRecalculate(out ulong evaluated);
         if (status != SheetStatus.Ok)
         {
-            message = SheetStatusText.Name(status);
+            RefreshComputedCells();
+            message = $"recalculation failed after {evaluated:N0} committed evaluations: {SheetStatusText.Name(status)}";
             return false;
         }
 
@@ -472,8 +483,14 @@ public sealed partial class WorksheetSession : IDisposable
             return false;
         }
 
+        status = _native.TryAudit(out NativeChainAudit audit);
+        if (status != SheetStatus.Ok)
+        {
+            message = SheetStatusText.Name(status);
+            return false;
+        }
         string head = proof.Length > 16 ? proof[..16] : proof;
-        message = $"proof verified · {head} · commits {NativeCommits:N0}";
+        message = $"retained proof verified · {head} · entries {audit.EntriesExamined:N0} · current payloads {audit.CellsVerified:N0} · superseded {audit.Superseded:N0} · dropped {audit.Dropped:N0}";
         return true;
     }
 
@@ -590,41 +607,46 @@ public sealed partial class WorksheetSession : IDisposable
 
     public void SaveCsv(string path)
     {
-        using StreamWriter writer = new(path, false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-
-        int lastRow = LastPopulatedRow();
-        int lastColumn = LastPopulatedColumn();
-
-        if (lastRow < 0 || lastColumn < 0)
+        string fullPath = Path.GetFullPath(path);
+        string directory = Path.GetDirectoryName(fullPath)
+            ?? throw new IOException("CSV destination has no directory");
+        string staged = Path.Combine(directory,
+            "." + Path.GetFileName(fullPath) + "." + Guid.NewGuid().ToString("N") + ".khz.tmp");
+        try
         {
-            return;
-        }
-
-        for (int row = 0; row <= lastRow; row++)
-        {
-            for (int column = 0; column <= lastColumn; column++)
+            // Stage beside the destination so a failed write never truncates
+            // the last good copy. Publish only after the stream is closed.
+            using (StreamWriter writer = new(staged, false,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: true)))
             {
-                if (column > 0)
+                int lastRow = LastPopulatedRow();
+                int lastColumn = LastPopulatedColumn();
+                for (int row = 0; row <= lastRow; row++)
                 {
-                    writer.Write(',');
+                    for (int column = 0; column <= lastColumn; column++)
+                    {
+                        if (column > 0) writer.Write(',');
+                        writer.Write(EscapeCsv(GetInput(row, column)));
+                    }
+                    writer.WriteLine();
                 }
-
-                writer.Write(EscapeCsv(GetInput(row, column)));
+                writer.Flush();
             }
-
-            writer.WriteLine();
+            File.Move(staged, fullPath, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(staged);
         }
     }
 
     public bool LoadCsv(string path, out string message)
     {
         message = string.Empty;
-        string text = File.ReadAllText(path);
         List<List<string>> records;
-
         try
         {
-            records = ParseCsv(text);
+            records = ParseCsv(File.ReadAllText(path));
         }
         catch (FormatException ex)
         {
@@ -632,26 +654,60 @@ public sealed partial class WorksheetSession : IDisposable
             return false;
         }
 
-        int rowCount = Math.Min(records.Count, Grid.Rows.Count);
-        int imported = 0;
-
-        for (int row = 0; row < rowCount; row++)
+        // Never accept a truncated import or modify the live sheet before all
+        // cells have been validated and recalculated in a separate session.
+        if (records.Count > Grid.Rows.Count)
         {
-            int columnCount = Math.Min(records[row].Count, Grid.Columns.Count);
-            for (int column = 0; column < columnCount; column++)
+            message = $"csv row limit exceeded: {records.Count:N0} > {Grid.Rows.Count:N0}";
+            return false;
+        }
+
+        List<CellEdit> changes = new();
+        for (int row = 0; row < records.Count; row++)
+        {
+            if (records[row].Count > Grid.Columns.Count)
+            {
+                message = $"csv column limit exceeded at row {row + 1}: {records[row].Count:N0} > {Grid.Columns.Count:N0}";
+                return false;
+            }
+
+            for (int column = 0; column < records[row].Count; column++)
             {
                 string value = records[row][column];
-                if (value.Length == 0)
+                if (value.Length == 0) continue;
+                if (value.Length > 8192)
                 {
-                    continue;
+                    message = $"csv cell too long at {ColumnName(column)}{row + 1}";
+                    return false;
                 }
-
-                CommitCell(row, column, value, out _);
-                imported++;
+                if (!ValidateTableEdit(row, column, value, out message))
+                {
+                    message = $"csv rejected at {ColumnName(column)}{row + 1}: {message}";
+                    return false;
+                }
+                changes.Add(new CellEdit(row, column, GetInput(row, column), value));
             }
         }
 
-        message = $"csv · {imported:N0} populated cells";
+        if (changes.Count == 0)
+        {
+            message = "csv · 0 populated cells";
+            return true;
+        }
+
+        if (!StageValues(changes, undo: false, out WorksheetSession? candidate, out string reason))
+        {
+            message = $"csv rejected: {reason}";
+            return false;
+        }
+
+        using (candidate!)
+            AdoptValues(candidate!);
+        // File import establishes a new history baseline; stale native-commit
+        // undo entries must not survive replacement of the native sheet.
+        _undo.Clear();
+        _redo.Clear();
+        message = $"csv · {changes.Count:N0} populated cells";
         return true;
     }
 
@@ -710,11 +766,6 @@ public sealed partial class WorksheetSession : IDisposable
         FormulaParseFailure failure;
         SheetStatus status = _native!.TrySetFormula(column, row, source, out failure);
 
-        if (status != SheetStatus.Ok && source.Length > 1)
-        {
-            status = _native.TrySetFormula(column, row, source[1..], out failure);
-        }
-
         message = status == SheetStatus.Ok
             ? string.Empty
             : $"{SheetStatusText.Name(status)} · byte {failure.Offset} · {failure.Expected}";
@@ -765,12 +816,14 @@ public sealed partial class WorksheetSession : IDisposable
 
     private string RenderCell(int row, int column, string fallback)
     {
+        if (!EngineAvailable) return fallback;
         SheetStatus status = _native!.TryGetCell((uint)column, (uint)row, out KhzCellNative cell);
         if (status != SheetStatus.Ok)
         {
             return fallback;
         }
 
+        if (cell.Kind == CellKind.Formula && cell.IsDirty) return fallback;
         if (cell.ErrorCode != CellErrorCode.None)
         {
             return ErrorText(cell.ErrorCode);
@@ -1103,6 +1156,8 @@ public sealed partial class WorksheetSession : IDisposable
         StringBuilder field = new();
 
         bool quoted = false;
+        bool afterQuote = false;
+        bool fieldStarted = false;
         int i = 0;
 
         while (i < text.Length)
@@ -1121,6 +1176,7 @@ public sealed partial class WorksheetSession : IDisposable
                     }
 
                     quoted = false;
+                    afterQuote = true;
                     i++;
                     continue;
                 }
@@ -1130,17 +1186,12 @@ public sealed partial class WorksheetSession : IDisposable
                 continue;
             }
 
-            if (c == '"' && field.Length == 0)
-            {
-                quoted = true;
-                i++;
-                continue;
-            }
-
             if (c == ',')
             {
                 row.Add(field.ToString());
                 field.Clear();
+                fieldStarted = false;
+                afterQuote = false;
                 i++;
                 continue;
             }
@@ -1149,6 +1200,8 @@ public sealed partial class WorksheetSession : IDisposable
             {
                 row.Add(field.ToString());
                 field.Clear();
+                fieldStarted = false;
+                afterQuote = false;
                 rows.Add(row);
                 row = new List<string>();
 
@@ -1164,16 +1217,29 @@ public sealed partial class WorksheetSession : IDisposable
                 continue;
             }
 
+            if (afterQuote)
+                throw new FormatException("CSV contains characters after a closing quote.");
+
+            if (c == '"')
+            {
+                if (fieldStarted)
+                    throw new FormatException("CSV contains an unexpected quote in an unquoted field.");
+                quoted = true;
+                fieldStarted = true;
+                i++;
+                continue;
+            }
+
             field.Append(c);
+            fieldStarted = true;
             i++;
         }
 
         if (quoted)
-        {
             throw new FormatException("CSV contains an unterminated quoted field.");
-        }
 
-        if (field.Length > 0 || row.Count > 0)
+        // A single quoted empty field (\"\") is still one valid CSV record.
+        if (fieldStarted || row.Count > 0)
         {
             row.Add(field.ToString());
             rows.Add(row);

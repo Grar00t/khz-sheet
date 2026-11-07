@@ -1,6 +1,8 @@
 #ifndef KHZ_STATUS_H
 #define KHZ_STATUS_H
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,7 +33,7 @@ typedef enum KhzSheetStatus {
 
 /* Never returns NULL. An unmapped value yields "ERR_UNKNOWN" rather than a
    bare integer, so a log line is readable without the header at hand. */
-const char *khz_sheet_status_name(KhzSheetStatus status);
+KHZ_API const char *khz_sheet_status_name(KhzSheetStatus status);
 
 #ifdef __cplusplus
 }

@@ -129,28 +129,44 @@ public partial class MainWindow : Window
             return;
         }
 
+        WorksheetSession? previous = CurrentSheet;
         WorksheetSession sheet = _workbook.AddSheet(Path.GetFileNameWithoutExtension(dialog.FileName));
         SheetList.SelectedItem = sheet;
+        bool loaded = false;
+        string failureMessage = string.Empty;
 
         try
         {
             if (sheet.LoadCsv(dialog.FileName, out string message))
             {
+                loaded = true;
                 SetStatus(message);
                 RefreshEngineText();
             }
             else
             {
-                SetStatus(message);
+                failureMessage = message;
             }
         }
         catch (IOException ex)
         {
-            SetStatus(ex.Message);
+            failureMessage = ex.Message;
         }
         catch (UnauthorizedAccessException ex)
         {
-            SetStatus(ex.Message);
+            failureMessage = ex.Message;
+        }
+        finally
+        {
+            // A rejected CSV must not strand an empty worksheet tab.
+            if (!loaded)
+            {
+                _workbook.Sheets.Remove(sheet);
+                sheet.Dispose();
+                SheetList.SelectedItem = previous;
+                RefreshEngineText();
+                SetStatus(failureMessage);
+            }
         }
     }
 
@@ -498,42 +514,17 @@ public partial class MainWindow : Window
             return;
         }
 
-        string clipboard = Clipboard.GetText();
-        string[] lines = clipboard
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Split('\n');
-
-        int written = 0;
-        string lastMessage = string.Empty;
-
-        for (int rowOffset = 0; rowOffset < lines.Length; rowOffset++)
+        if (!sheet.PasteCells(startRow, startColumn, Clipboard.GetText(), out string message))
         {
-            if (rowOffset == lines.Length - 1 && lines[rowOffset].Length == 0)
-            {
-                continue;
-            }
-
-            string[] cells = lines[rowOffset].Split('\t');
-            for (int columnOffset = 0; columnOffset < cells.Length; columnOffset++)
-            {
-                int row = startRow + rowOffset;
-                int column = startColumn + columnOffset;
-
-                if (row >= sheet.Grid.Rows.Count || column >= sheet.Grid.Columns.Count)
-                {
-                    continue;
-                }
-
-                sheet.CommitCell(row, column, cells[columnOffset], out lastMessage);
-                written++;
-            }
+            SetStatus(message);
+            return;
         }
 
-        SetStatus($"pasted {written:N0} cells · {lastMessage}");
+        SetStatus(message);
         RefreshEngineText();
         SheetGrid.Items.Refresh();
         UpdateFormulaBar();
+        RefreshRealizedCellStyles();
     }
 
     private void ClearSelectedCells()
@@ -563,12 +554,14 @@ public partial class MainWindow : Window
         }
 
         string lastMessage = string.Empty;
+        int cleared = 0, rejected = 0;
         foreach ((int row, int column) in cells.Distinct())
         {
-            sheet.CommitCell(row, column, string.Empty, out lastMessage);
+            if (sheet.CommitCell(row, column, string.Empty, out lastMessage)) cleared++;
+            else rejected++;
         }
 
-        SetStatus($"cleared {cells.Distinct().Count():N0} cells · {lastMessage}");
+        SetStatus($"cleared {cleared:N0}; rejected {rejected:N0} cells · {lastMessage}");
         RefreshEngineText();
         SheetGrid.Items.Refresh();
         UpdateFormulaBar();
@@ -758,6 +751,9 @@ public partial class MainWindow : Window
     private void RefreshEngineText()
     {
         EngineText.Text = CurrentSheet?.EngineSummary ?? "no sheet";
+        bool available = CurrentSheet?.EngineAvailable == true;
+        SheetGrid.IsReadOnly = !available;
+        FormulaBox.IsEnabled = available;
     }
 
     private void SetStatus(string message)

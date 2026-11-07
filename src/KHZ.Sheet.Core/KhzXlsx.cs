@@ -69,7 +69,7 @@ namespace KHZ.Sheet.Core
     /// </summary>
     internal static unsafe class KhzNativeXlsx
     {
-        internal const string Lib = "khz_sheet";
+        internal const string Lib = "khzcore";
 
         [DllImport(Lib, EntryPoint = "khz_xlsx_write", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int XlsxWrite(void* sheet, void* scratchArena,

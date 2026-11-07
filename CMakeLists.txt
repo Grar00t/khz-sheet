@@ -73,7 +73,7 @@ if(KHZ_SANITIZER_FLAGS)
         message(FATAL_ERROR "Requested sanitizers are supported here only with GCC/Clang")
     endif()
 
-    set(CMAKE_REQUIRED_FLAGS ${KHZ_SANITIZER_FLAGS})
+    string(JOIN " " CMAKE_REQUIRED_FLAGS ${KHZ_SANITIZER_FLAGS})
     set(CMAKE_REQUIRED_LINK_OPTIONS ${KHZ_SANITIZER_FLAGS})
     check_c_compiler_flag("" KHZ_SANITIZERS_LINK)
     unset(CMAKE_REQUIRED_FLAGS)
@@ -109,7 +109,9 @@ set(KHZ_SOURCES
 )
 
 add_library(khz_sheet_objects OBJECT ${KHZ_SOURCES})
-set_target_properties(khz_sheet_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(khz_sheet_objects PROPERTIES
+    POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
+target_compile_definitions(khz_sheet_objects PRIVATE KHZ_STATIC=1)
 target_include_directories(khz_sheet_objects PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -153,6 +155,10 @@ if(NOT KHZ_LEDGER_ACTIVE)
 endif()
 
 add_library(khz_sheet STATIC $<TARGET_OBJECTS:khz_sheet_objects>)
+target_compile_definitions(khz_sheet INTERFACE KHZ_STATIC=1)
+if(NOT WIN32)
+    target_link_libraries(khz_sheet PUBLIC m)
+endif()
 target_include_directories(khz_sheet PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -162,15 +168,31 @@ if(KHZ_LEDGER_ACTIVE)
 endif()
 
 if(KHZ_BUILD_SHARED)
-    add_library(khz_sheet_shared SHARED $<TARGET_OBJECTS:khz_sheet_objects>)
+    add_library(khz_shared_objects OBJECT ${KHZ_SOURCES})
+    set_target_properties(khz_shared_objects PROPERTIES
+        POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
+    target_include_directories(khz_shared_objects PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(khz_shared_objects PRIVATE KHZ_BUILDING_LIBRARY=1)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(khz_shared_objects PRIVATE -Wall -Wextra -Wshadow -Wvla
+            $<$<CONFIG:Release>:-O3>)
+    endif()
+    if(KHZ_LEDGER_ACTIVE)
+        target_include_directories(khz_shared_objects PRIVATE ${KHZ_SQLITE3_INCLUDE_DIR})
+        target_compile_definitions(khz_shared_objects PRIVATE KHZ_WITH_SQLITE=1)
+    endif()
+    add_library(khz_sheet_shared SHARED $<TARGET_OBJECTS:khz_shared_objects>)
     set_target_properties(khz_sheet_shared PROPERTIES
-        OUTPUT_NAME khz_sheet
-        WINDOWS_EXPORT_ALL_SYMBOLS ON
+        OUTPUT_NAME khzcore
+        WINDOWS_EXPORT_ALL_SYMBOLS OFF
     )
     target_include_directories(khz_sheet_shared PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     )
+    if(NOT WIN32)
+        target_link_libraries(khz_sheet_shared PRIVATE m)
+    endif()
     if(KHZ_LEDGER_ACTIVE)
         target_link_libraries(khz_sheet_shared PUBLIC ${KHZ_SQLITE3_LIBRARY})
     endif()
@@ -332,4 +354,19 @@ if(KHZ_BUILD_TESTS)
     add_executable(khz_formula_extended_test tests/khz_formula_extended_test.c)
     target_link_libraries(khz_formula_extended_test PRIVATE khz_sheet)
     add_test(NAME khz_formula_extended_test COMMAND khz_formula_extended_test)
+endif()
+
+if(KHZ_BUILD_SELFTEST AND KHZ_BUILD_SHARED)
+    add_executable(khz_selftest_runner "${CMAKE_CURRENT_BINARY_DIR}/khz_selftest_main.c")
+    target_link_libraries(khz_selftest_runner PRIVATE khz_sheet_shared)
+    add_test(NAME khz_selftest_runner COMMAND khz_selftest_runner)
+endif()
+if(KHZ_BUILD_TESTS)
+    add_executable(khz_interop_regression_test tests/khz_interop_regression_test.c)
+    if(KHZ_BUILD_SHARED)
+        target_link_libraries(khz_interop_regression_test PRIVATE khz_sheet_shared)
+    else()
+        target_link_libraries(khz_interop_regression_test PRIVATE khz_sheet)
+    endif()
+    add_test(NAME khz_interop_regression_test COMMAND khz_interop_regression_test)
 endif()

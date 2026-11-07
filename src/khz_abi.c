@@ -8,6 +8,7 @@
 #include "khz_ledger.h"
 #include "khz_sheet.h"
 #include "khz_simd.h"
+#include "khz_xlsx.h"
 
 KhzSheetStatus khz_abi_sizes(KhzAbiSizes *out)
 {
@@ -128,3 +129,21 @@ int khz_abi_range_edges_compiled(void)
 {
     return 1;
 }
+
+size_t khz_abi_sheet_alignment(void) { return _Alignof(KhzSheet); }
+size_t khz_abi_cell_field_offset(uint32_t field)
+{
+    static const size_t offsets[] = {
+        offsetof(KhzCell, col), offsetof(KhzCell, row),
+        offsetof(KhzCell, kind), offsetof(KhzCell, error),
+        offsetof(KhzCell, value), offsetof(KhzCell, text),
+        offsetof(KhzCell, formula), offsetof(KhzCell, text_len),
+        offsetof(KhzCell, formula_len), offsetof(KhzCell, bool_value),
+        offsetof(KhzCell, flags), offsetof(KhzCell, revision),
+        offsetof(KhzCell, proof), offsetof(KhzCell, reserved)
+    };
+    return field < sizeof offsets / sizeof offsets[0] ? offsets[field] : SIZE_MAX;
+}
+size_t khz_abi_parse_error_bytes(void) { return sizeof(KhzFormulaParseError); }
+size_t khz_abi_chain_audit_bytes(void) { return sizeof(KhzChainAudit); }
+size_t khz_abi_xlsx_report_bytes(void) { return sizeof(KhzXlsxReport); }
