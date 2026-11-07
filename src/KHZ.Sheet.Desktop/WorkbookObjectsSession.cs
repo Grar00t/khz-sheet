@@ -44,6 +44,78 @@ public sealed partial class WorksheetSession
     }
     private sealed record ObjectEdit(TableDefinition? Table, ChartDefinition? Chart) : WorksheetEdit;
     private sealed record TableTotalsEdit(TableDefinition Table, IReadOnlyList<CellEdit> Cells) : WorksheetEdit;
+    private sealed record BulkCellsEdit(IReadOnlyList<CellEdit> Cells) : WorksheetEdit;
+
+    public bool PasteCells(int startRow, int startColumn, string clipboard, out string message)
+    {
+        message = "Nothing to paste";
+        if (!EngineAvailable) { message = EngineSummary; return false; }
+        if (!InBounds(startRow, startColumn)) { message = "Paste start is outside the worksheet"; return false; }
+        if (string.IsNullOrEmpty(clipboard)) return false;
+
+        string[] lines = clipboard.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n').Split('\n');
+        int rowCount = lines.Length;
+        if (rowCount > 0 && lines[^1].Length == 0) rowCount--;
+        if (rowCount == 0) return false;
+        if (rowCount > Grid.Rows.Count - startRow)
+        {
+            message = $"Paste exceeds worksheet row limit ({Grid.Rows.Count})";
+            return false;
+        }
+
+        List<CellEdit> changes = new();
+        for (int r = 0; r < rowCount; r++)
+        {
+            string[] cells = lines[r].Split('\t');
+            if (cells.Length > Grid.Columns.Count - startColumn)
+            {
+                message = $"Paste exceeds worksheet column limit at row {startRow + r + 1}";
+                return false;
+            }
+
+            for (int c = 0; c < cells.Length; c++)
+            {
+                int row = startRow + r;
+                int column = startColumn + c;
+                string after = cells[c];
+                string before = GetInput(row, column);
+                if (after.Length > 8192)
+                {
+                    message = $"Paste cell too long at {ColumnName(column)}{row + 1}";
+                    return false;
+                }
+                if (!ValidateTableEdit(row, column, after, out string reason))
+                {
+                    message = $"Paste rejected at {ColumnName(column)}{row + 1}: {reason}";
+                    return false;
+                }
+                if (!string.Equals(before, after, StringComparison.Ordinal))
+                    changes.Add(new CellEdit(row, column, before, after));
+            }
+        }
+        if (changes.Count == 0)
+        {
+            message = "Paste contains no changes";
+            return true;
+        }
+
+        if (!StageValues(changes, false, out var candidate, out string error))
+        {
+            message = $"Paste rejected: {error}";
+            return false;
+        }
+        using (candidate) AdoptValues(candidate!);
+        foreach (int row in changes.Select(c => c.Row).Distinct())
+            UpdateTableHeaders(row);
+        // The staged sheet begins a new native proof history. Do not keep
+        // stale undo commits from the prior native sheet.
+        _undo.Clear();
+        _redo.Clear();
+        _undo.Push(new BulkCellsEdit(changes));
+        message = $"Pasted {changes.Count:N0} changed cells atomically; previous undo history reset";
+        return true;
+    }
 
     private bool StageValues(IReadOnlyList<CellEdit> changes, bool undo, out WorksheetSession? candidate, out string message)
     {

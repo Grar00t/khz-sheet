@@ -6,6 +6,8 @@
 
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -30,55 +32,55 @@ typedef struct KhzRational {
 } KhzRational;
 
 /* Exact zero: 0/1. */
-KhzRational khz_rational_zero(void);
+KHZ_API KhzRational khz_rational_zero(void);
 
 /* Exact one: 1/1. */
-KhzRational khz_rational_one(void);
+KHZ_API KhzRational khz_rational_one(void);
 
 /* Normalises num/den into *out. den == 0 is KHZ_SHEET_ERR_DIVZERO. */
-KhzSheetStatus khz_rational_make(int64_t num, int64_t den, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_make(int64_t num, int64_t den, KhzRational *out);
 
-KhzSheetStatus khz_rational_from_i64(int64_t value, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_from_i64(int64_t value, KhzRational *out);
 
-KhzSheetStatus khz_rational_add(KhzRational a, KhzRational b, KhzRational *out);
-KhzSheetStatus khz_rational_sub(KhzRational a, KhzRational b, KhzRational *out);
-KhzSheetStatus khz_rational_mul(KhzRational a, KhzRational b, KhzRational *out);
-KhzSheetStatus khz_rational_div(KhzRational a, KhzRational b, KhzRational *out);
-KhzSheetStatus khz_rational_neg(KhzRational a, KhzRational *out);
-KhzSheetStatus khz_rational_abs(KhzRational a, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_add(KhzRational a, KhzRational b, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_sub(KhzRational a, KhzRational b, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_mul(KhzRational a, KhzRational b, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_div(KhzRational a, KhzRational b, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_neg(KhzRational a, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_abs(KhzRational a, KhzRational *out);
 
 /* Explicit decimal quantization, half away from zero; decimals in [-18,18].
    Integer-only 128-bit intermediates. Failure leaves out untouched. */
-KhzSheetStatus khz_rational_round(KhzRational a, int64_t decimals, KhzRational *out);
-KhzSheetStatus khz_rational_floor(KhzRational a, KhzRational *out);
-KhzSheetStatus khz_rational_ceiling(KhzRational a, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_round(KhzRational a, int64_t decimals, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_floor(KhzRational a, KhzRational *out);
+KHZ_API KhzSheetStatus khz_rational_ceiling(KhzRational a, KhzRational *out);
 
 /* *cmp receives -1, 0 or 1. Comparison is exact and does not form potentially
    overflowing cross-products; every pair of valid KhzRational values is
    orderable. */
-KhzSheetStatus khz_rational_compare(KhzRational a, KhzRational b, int *cmp);
+KHZ_API KhzSheetStatus khz_rational_compare(KhzRational a, KhzRational b, int *cmp);
 
 /* 1 when den == 1, else 0. A malformed input reports 0. */
-int khz_rational_is_integer(KhzRational a);
+KHZ_API int khz_rational_is_integer(KhzRational a);
 
 /* Exact only. A non-integer value is KHZ_SHEET_ERR_RANGE. */
-KhzSheetStatus khz_rational_to_i64(KhzRational a, int64_t *out);
+KHZ_API KhzSheetStatus khz_rational_to_i64(KhzRational a, int64_t *out);
 
 /* Lossy by construction, and named so. Provided for display and for interop
    with formats that cannot carry a rational. Never used internally. */
-KhzSheetStatus khz_rational_to_double(KhzRational a, double *out);
+KHZ_API KhzSheetStatus khz_rational_to_double(KhzRational a, double *out);
 
 /* Writes "n" for an integer and "n/d" otherwise, NUL terminated.
    *written receives the length excluding the terminator.
    A buffer too small is KHZ_SHEET_ERR_RANGE and nothing is written. */
-KhzSheetStatus khz_rational_format(KhzRational a, char *out, size_t capacity, size_t *written);
+KHZ_API KhzSheetStatus khz_rational_format(KhzRational a, char *out, size_t capacity, size_t *written);
 
 /* Stable across runs and machines: FNV-1a over the canonical little-endian
    encoding of the normalised pair. Equal values always hash equal. */
-uint64_t khz_rational_hash(KhzRational a);
+KHZ_API uint64_t khz_rational_hash(KhzRational a);
 
 /* 1 when every invariant above holds. */
-int khz_rational_is_valid(KhzRational a);
+KHZ_API int khz_rational_is_valid(KhzRational a);
 
 #ifdef __cplusplus
 }

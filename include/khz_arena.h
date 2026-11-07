@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -47,41 +49,41 @@ typedef struct KhzArena {
     KhzArenaBacking backing;
 } KhzArena;
 
-KhzArenaStatus khz_arena_init(KhzArena *arena, size_t bytes);
-KhzArenaStatus khz_arena_init_default(KhzArena *arena);
-void khz_arena_destroy(KhzArena *arena);
+KHZ_API KhzArenaStatus khz_arena_init(KhzArena *arena, size_t bytes);
+KHZ_API KhzArenaStatus khz_arena_init_default(KhzArena *arena);
+KHZ_API void khz_arena_destroy(KhzArena *arena);
 
 /* Returns NULL on exhaustion and counts the rejection. It does not fall back
    to the heap: a caller that silently grows past its reservation has lost the
    property the arena exists to provide. */
-void *khz_arena_alloc(KhzArena *arena, size_t bytes);
+KHZ_API void *khz_arena_alloc(KhzArena *arena, size_t bytes);
 
 /* alignment must be a power of two. Alignment is computed against the
    absolute address of the block, not against the offset, so a request tighter
    than the base's own alignment is still satisfied correctly on every
    backing - including the malloc backing, whose base is only guaranteed to
    KHZ_ARENA_ALIGNMENT. */
-void *khz_arena_alloc_aligned(KhzArena *arena, size_t bytes, size_t alignment);
-void *khz_arena_alloc_zeroed(KhzArena *arena, size_t bytes);
+KHZ_API void *khz_arena_alloc_aligned(KhzArena *arena, size_t bytes, size_t alignment);
+KHZ_API void *khz_arena_alloc_zeroed(KhzArena *arena, size_t bytes);
 
 /* Reset and release are not synchronised against concurrent allocation. They
    are safe only when the caller knows no other thread is allocating; that is a
    condition on the caller, not a promise this code can keep for it. */
-KhzArenaStatus khz_arena_reset(KhzArena *arena);
-size_t khz_arena_mark(const KhzArena *arena);
-KhzArenaStatus khz_arena_release(KhzArena *arena, size_t mark);
+KHZ_API KhzArenaStatus khz_arena_reset(KhzArena *arena);
+KHZ_API size_t khz_arena_mark(const KhzArena *arena);
+KHZ_API KhzArenaStatus khz_arena_release(KhzArena *arena, size_t mark);
 
-size_t khz_arena_capacity(const KhzArena *arena);
-size_t khz_arena_used(const KhzArena *arena);
-size_t khz_arena_remaining(const KhzArena *arena);
-size_t khz_arena_peak(const KhzArena *arena);
-uint64_t khz_arena_allocations(const KhzArena *arena);
-uint64_t khz_arena_rejections(const KhzArena *arena);
-uint64_t khz_arena_resets(const KhzArena *arena);
-KhzArenaBacking khz_arena_backing(const KhzArena *arena);
+KHZ_API size_t khz_arena_capacity(const KhzArena *arena);
+KHZ_API size_t khz_arena_used(const KhzArena *arena);
+KHZ_API size_t khz_arena_remaining(const KhzArena *arena);
+KHZ_API size_t khz_arena_peak(const KhzArena *arena);
+KHZ_API uint64_t khz_arena_allocations(const KhzArena *arena);
+KHZ_API uint64_t khz_arena_rejections(const KhzArena *arena);
+KHZ_API uint64_t khz_arena_resets(const KhzArena *arena);
+KHZ_API KhzArenaBacking khz_arena_backing(const KhzArena *arena);
 
-const char *khz_arena_status_name(KhzArenaStatus status);
-const char *khz_arena_backing_name(KhzArenaBacking backing);
+KHZ_API const char *khz_arena_status_name(KhzArenaStatus status);
+KHZ_API const char *khz_arena_backing_name(KhzArenaBacking backing);
 
 #ifdef __cplusplus
 }

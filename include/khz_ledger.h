@@ -10,6 +10,8 @@
 #include "khz_sheet.h"
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -54,19 +56,19 @@ typedef struct KhzLedger {
 } KhzLedger;
 
 /* Binds the ledger to an arena. Does not touch the filesystem. */
-KhzSheetStatus khz_ledger_init(KhzLedger *ledger, KhzArena *arena);
+KHZ_API KhzSheetStatus khz_ledger_init(KhzLedger *ledger, KhzArena *arena);
 
 /* Opens or creates the database at path, creates the schema if absent, and
    loads the existing row count and chain head.
 
    Reopening an existing ledger resumes its chain: the head becomes the hash of
    the last recorded commit, so the next append must chain onto it. */
-KhzSheetStatus khz_ledger_open(KhzLedger *ledger, const char *path);
+KHZ_API KhzSheetStatus khz_ledger_open(KhzLedger *ledger, const char *path);
 
 /* Closes the database and finalises the prepared statement. Safe on an
    unopened ledger. The arena is not touched: bytes taken from it stay taken
    until the arena itself is reset. */
-void khz_ledger_close(KhzLedger *ledger);
+KHZ_API void khz_ledger_close(KhzLedger *ledger);
 
 /* Records one committed cell.
 
@@ -79,7 +81,7 @@ void khz_ledger_close(KhzLedger *ledger);
    The timestamp is recorded for operators and is deliberately not part of any
    digest, so the chain stays reproducible on a machine with a different
    clock. */
-KhzSheetStatus khz_ledger_append_cell(KhzLedger *ledger, const KhzCell *cell);
+KHZ_API KhzSheetStatus khz_ledger_append_cell(KhzLedger *ledger, const KhzCell *cell);
 
 /* Appends every cell currently in the sheet, in grid order, and then checks
    that the resulting head equals the sheet's own head. Intended for the
@@ -87,7 +89,7 @@ KhzSheetStatus khz_ledger_append_cell(KhzLedger *ledger, const KhzCell *cell);
    containing rewrites will fail with KHZ_SHEET_ERR_FORMAT on the first cell
    whose proof does not chain, which is the honest outcome rather than a
    fabricated ordering. */
-KhzSheetStatus khz_ledger_append_sheet(KhzLedger *ledger, const KhzSheet *sheet);
+KHZ_API KhzSheetStatus khz_ledger_append_sheet(KhzLedger *ledger, const KhzSheet *sheet);
 
 /* Replays every recorded row in id order and checks that each row's prev_hash
    equals the previous row's hash, that the first chains onto the 32 zero bytes
@@ -95,37 +97,37 @@ KhzSheetStatus khz_ledger_append_sheet(KhzLedger *ledger, const KhzSheet *sheet)
 
    *checked receives the number of rows examined. *failed_id receives the row
    id of the first break, or -1 when the chain is whole. Both are optional. */
-KhzSheetStatus khz_ledger_verify_chain(KhzLedger *ledger, uint64_t *checked,
+KHZ_API KhzSheetStatus khz_ledger_verify_chain(KhzLedger *ledger, uint64_t *checked,
                                        int64_t *failed_id);
 
 /* Loads the whole chain into arena memory in id order, newest last. The array
    is arena owned; take a mark before calling and release it afterwards if the
    bytes are wanted back. */
-KhzSheetStatus khz_ledger_load_chain(KhzLedger *ledger,
+KHZ_API KhzSheetStatus khz_ledger_load_chain(KhzLedger *ledger,
                                      unsigned char (**hashes)[KHZ_SHA256_DIGEST_BYTES],
                                      size_t *count);
 
 /* Number of commits recorded for one coordinate. Answers "how many times has
    this cell changed", which the grid cannot answer after a rewrite. */
-KhzSheetStatus khz_ledger_cell_history_count(KhzLedger *ledger, uint32_t col,
+KHZ_API KhzSheetStatus khz_ledger_cell_history_count(KhzLedger *ledger, uint32_t col,
                                              uint32_t row, uint64_t *count);
 
-KhzSheetStatus khz_ledger_head(const KhzLedger *ledger,
+KHZ_API KhzSheetStatus khz_ledger_head(const KhzLedger *ledger,
                                unsigned char out[KHZ_SHA256_DIGEST_BYTES]);
-KhzSheetStatus khz_ledger_head_hex(const KhzLedger *ledger,
+KHZ_API KhzSheetStatus khz_ledger_head_hex(const KhzLedger *ledger,
                                    char out[KHZ_SHA256_HEX_BYTES]);
 
-uint64_t khz_ledger_rows(const KhzLedger *ledger);
-uint64_t khz_ledger_appended(const KhzLedger *ledger);
+KHZ_API uint64_t khz_ledger_rows(const KhzLedger *ledger);
+KHZ_API uint64_t khz_ledger_appended(const KhzLedger *ledger);
 
 /* Human-readable text for the last sqlite failure, or "" when the last
    operation succeeded. Owned by sqlite; valid until the next ledger call. */
-const char *khz_ledger_last_error(const KhzLedger *ledger);
+KHZ_API const char *khz_ledger_last_error(const KhzLedger *ledger);
 
 /* 1 when this translation unit was compiled with sqlite3 available. When 0,
    every function above returns KHZ_SHEET_ERR_UNSUPPORTED and touches
    nothing. */
-int khz_ledger_available(void);
+KHZ_API int khz_ledger_available(void);
 
 #ifdef __cplusplus
 }

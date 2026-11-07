@@ -545,6 +545,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
 
             khz_dirty_dependents(sheet, order[i]);
             ++done;
+            if (evaluated != NULL) *evaluated = done;
             continue;
         }
         status = khz_formula_eval(sheet, &formula, &result);
@@ -587,6 +588,7 @@ KhzSheetStatus khz_formula_recalc(KhzSheet *sheet, uint64_t *evaluated)
         }
 
         ++done;
+        if (evaluated != NULL) *evaluated = done;
     }
 
     (void)khz_arena_release(arena, mark);

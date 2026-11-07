@@ -8,6 +8,8 @@
 #include "khz_sheet.h"
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -79,7 +81,7 @@ typedef struct KhzXlsxReport {
      KHZ_SHEET_ERR_MEMORY    arena exhausted
      KHZ_SHEET_ERR_LIMIT     a part exceeded the size the writer can address
      KHZ_SHEET_ERR_OS        the file could not be created or written */
-KhzSheetStatus khz_xlsx_write(const KhzSheet *sheet, KhzArena *scratch,
+KHZ_API KhzSheetStatus khz_xlsx_write(const KhzSheet *sheet, KhzArena *scratch,
                               const char *path, const char *sheet_name,
                               KhzXlsxReport *report);
 
@@ -87,14 +89,14 @@ KhzSheetStatus khz_xlsx_write(const KhzSheet *sheet, KhzArena *scratch,
    to hand the bytes to something else. The buffer is arena owned; take a mark
    before calling if the bytes should be reclaimed afterwards. Note that this
    entry point does not release the arena, since the result lives in it. */
-KhzSheetStatus khz_xlsx_build(const KhzSheet *sheet, KhzArena *scratch,
+KHZ_API KhzSheetStatus khz_xlsx_build(const KhzSheet *sheet, KhzArena *scratch,
                               const char *sheet_name,
                               const unsigned char **bytes, size_t *length,
                               KhzXlsxReport *report);
 
 /* Column index to A1 letters, 0 based: 0 gives "A", 26 gives "AA", 16383
    gives "XFD". capacity must be at least 4 including the terminator. */
-KhzSheetStatus khz_xlsx_column_name(uint32_t col, char *out, size_t capacity,
+KHZ_API KhzSheetStatus khz_xlsx_column_name(uint32_t col, char *out, size_t capacity,
                                     size_t *written);
 
 #ifdef __cplusplus

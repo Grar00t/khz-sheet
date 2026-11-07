@@ -12,6 +12,8 @@
 #include "khz_simd.h"
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -76,24 +78,24 @@ typedef struct KhzSheet {
 
 /* arena_bytes is the whole budget. cell_capacity is the ceiling on populated
    cells and cannot be raised afterwards; it also sizes the commit log. */
-KhzSheetStatus khz_sheet_init(KhzSheet *sheet, size_t arena_bytes, size_t cell_capacity);
-KhzSheetStatus khz_sheet_init_default(KhzSheet *sheet);
-void khz_sheet_destroy(KhzSheet *sheet);
+KHZ_API KhzSheetStatus khz_sheet_init(KhzSheet *sheet, size_t arena_bytes, size_t cell_capacity);
+KHZ_API KhzSheetStatus khz_sheet_init_default(KhzSheet *sheet);
+KHZ_API void khz_sheet_destroy(KhzSheet *sheet);
 
 /* Each setter copies any text into the arena, commits the cell onto the chain
    head, advances the head, and records the event in the commit log. A failed
    setter advances nothing and records nothing. */
-KhzSheetStatus khz_sheet_set_rational(KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_set_rational(KhzSheet *sheet, uint32_t col, uint32_t row,
                                      KhzRational value);
-KhzSheetStatus khz_sheet_set_i64(KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_set_i64(KhzSheet *sheet, uint32_t col, uint32_t row,
                                 int64_t value);
-KhzSheetStatus khz_sheet_set_text(KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_set_text(KhzSheet *sheet, uint32_t col, uint32_t row,
                                  const char *text, size_t len);
-KhzSheetStatus khz_sheet_set_bool(KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_set_bool(KhzSheet *sheet, uint32_t col, uint32_t row,
                                  int value);
-KhzSheetStatus khz_sheet_set_error(KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_set_error(KhzSheet *sheet, uint32_t col, uint32_t row,
                                   KhzCellError error);
-KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row,
                                     const char *formula, size_t len);
 
 /* Commits a cell that was modified in place, then records the event.
@@ -103,33 +105,33 @@ KhzSheetStatus khz_sheet_set_formula(KhzSheet *sheet, uint32_t col, uint32_t row
    the chain goes through here or through a setter, and nothing else may touch
    sheet->proof - otherwise the log and the chain would disagree and the audit
    would be measuring its own bookkeeping rather than the data. */
-KhzSheetStatus khz_sheet_commit_in_place(KhzSheet *sheet, KhzCell *cell);
+KHZ_API KhzSheetStatus khz_sheet_commit_in_place(KhzSheet *sheet, KhzCell *cell);
 
 /* Borrowed pointer into the arena, valid until the sheet is reset or
    destroyed. KHZ_SHEET_ERR_MISSING for a blank coordinate. */
-KhzSheetStatus khz_sheet_get(const KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_get(const KhzSheet *sheet, uint32_t col, uint32_t row,
                             const KhzCell **cell);
 
 /* Mutable form, for callers that update a cell in place and then commit it.
    KHZ_SHEET_ERR_MISSING for a blank coordinate. */
-KhzSheetStatus khz_sheet_get_mutable(KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_get_mutable(KhzSheet *sheet, uint32_t col, uint32_t row,
                                      KhzCell **cell);
 
-KhzSheetStatus khz_sheet_declare_dependency(KhzSheet *sheet,
+KHZ_API KhzSheetStatus khz_sheet_declare_dependency(KhzSheet *sheet,
                                             uint32_t from_col, uint32_t from_row,
                                             uint32_t to_col, uint32_t to_row);
 
 /* order must hold khz_sheet_cell_count entries. KHZ_SHEET_ERR_CYCLE on a
    circular reference. */
-KhzSheetStatus khz_sheet_evaluation_order(KhzSheet *sheet, size_t *order,
+KHZ_API KhzSheetStatus khz_sheet_evaluation_order(KhzSheet *sheet, size_t *order,
                                           size_t capacity, size_t *count);
 
 /* Marks a cell and everything reachable from it as needing recalculation.
    Returns the number of cells marked, including the origin when it is a
    formula. A cycle is reported rather than walked. */
-KhzSheetStatus khz_sheet_mark_dirty(KhzSheet *sheet, uint32_t col, uint32_t row,
+KHZ_API KhzSheetStatus khz_sheet_mark_dirty(KhzSheet *sheet, uint32_t col, uint32_t row,
                                     uint64_t *marked);
-size_t khz_sheet_dirty_count(const KhzSheet *sheet);
+KHZ_API size_t khz_sheet_dirty_count(const KhzSheet *sheet);
 
 /* SUM and AVERAGE over an inclusive rectangle, exact.
 
@@ -141,11 +143,11 @@ size_t khz_sheet_dirty_count(const KhzSheet *sheet);
    When every contributing cell shares a denominator the numerators are gathered
    into arena scratch and summed through the SIMD kernel; otherwise the fold is
    scalar. Both paths produce the same rational. */
-KhzSheetStatus khz_sheet_sum(KhzSheet *sheet,
+KHZ_API KhzSheetStatus khz_sheet_sum(KhzSheet *sheet,
                              uint32_t col0, uint32_t row0,
                              uint32_t col1, uint32_t row1,
                              KhzRational *out, size_t *counted);
-KhzSheetStatus khz_sheet_avg(KhzSheet *sheet,
+KHZ_API KhzSheetStatus khz_sheet_avg(KhzSheet *sheet,
                              uint32_t col0, uint32_t row0,
                              uint32_t col1, uint32_t row1,
                              KhzRational *out, size_t *counted);
@@ -178,33 +180,33 @@ typedef struct KhzChainAudit {
    reported a failure after any recalculation even though nothing had been
    tampered with. KHZ_SHEET_OK means no retained link and no still-current cell
    payload has been altered since it was committed. */
-KhzSheetStatus khz_sheet_verify_chain(const KhzSheet *sheet, size_t *failed_index);
-KhzSheetStatus khz_sheet_audit_chain(const KhzSheet *sheet, KhzChainAudit *audit);
+KHZ_API KhzSheetStatus khz_sheet_verify_chain(const KhzSheet *sheet, size_t *failed_index);
+KHZ_API KhzSheetStatus khz_sheet_audit_chain(const KhzSheet *sheet, KhzChainAudit *audit);
 
-KhzSheetStatus khz_sheet_proof_hex(const KhzSheet *sheet, char out[KHZ_SHA256_HEX_BYTES]);
+KHZ_API KhzSheetStatus khz_sheet_proof_hex(const KhzSheet *sheet, char out[KHZ_SHA256_HEX_BYTES]);
 
-size_t   khz_sheet_cell_count(const KhzSheet *sheet);
-uint64_t khz_sheet_commits(const KhzSheet *sheet);
-KhzArena *khz_sheet_arena(KhzSheet *sheet);
+KHZ_API size_t   khz_sheet_cell_count(const KhzSheet *sheet);
+KHZ_API uint64_t khz_sheet_commits(const KhzSheet *sheet);
+KHZ_API KhzArena *khz_sheet_arena(KhzSheet *sheet);
 
 /* Commit-log state, exposed so a caller can tell how much of the history is
    still retained before trusting an audit. */
-size_t   khz_sheet_log_capacity(const KhzSheet *sheet);
-uint64_t khz_sheet_log_recorded(const KhzSheet *sheet);
-uint64_t khz_sheet_log_dropped(const KhzSheet *sheet);
+KHZ_API size_t   khz_sheet_log_capacity(const KhzSheet *sheet);
+KHZ_API uint64_t khz_sheet_log_recorded(const KhzSheet *sheet);
+KHZ_API uint64_t khz_sheet_log_dropped(const KhzSheet *sheet);
 
 /* Arena mark and release, exposed so a caller can bound a speculative batch
    and give the bytes back. Releasing below a mark taken before cells were
    added invalidates those cells; the grid is not rewound with the arena, so
    this is for scratch use, not for undo. */
-size_t khz_sheet_mark(const KhzSheet *sheet);
-KhzSheetStatus khz_sheet_release(KhzSheet *sheet, size_t mark);
+KHZ_API size_t khz_sheet_mark(const KhzSheet *sheet);
+KHZ_API KhzSheetStatus khz_sheet_release(KhzSheet *sheet, size_t mark);
 
-const char *khz_sheet_status_name(KhzSheetStatus status);
+KHZ_API const char *khz_sheet_status_name(KhzSheetStatus status);
 
 /* Returns the number of failed checks across the arena, hash, rational, grid
    and SIMD layers. Zero means every compiled-in known-answer test matched. */
-int khz_sheet_selftest(void);
+KHZ_API int khz_sheet_selftest(void);
 
 #ifdef __cplusplus
 }

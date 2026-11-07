@@ -132,7 +132,7 @@ namespace KHZ.Sheet.Core
 		/// libkhz_sheet.dylib. Built by the khz_sheet_shared CMake target, which
 		/// must be on the loader path.
 		/// </summary>
-		internal const string Lib = "khz_sheet";
+		internal const string Lib = "khzcore";
 
 		[DllImport(Lib, EntryPoint = "khz_abi_sizes", CallingConvention = CallingConvention.Cdecl)]
 		internal static extern int AbiSizes(KhzAbiSizes* sizes);

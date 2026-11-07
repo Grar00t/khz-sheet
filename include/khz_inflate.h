@@ -48,6 +48,8 @@
 #include "khz_arena.h"
 #include "khz_status.h"
 
+#include "khz_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -133,7 +135,7 @@ typedef struct KhzInflate {
  * Never allocates. Never reads outside the input range. Never writes outside
  * the output range - and the ERR_MEMORY case is a refusal to write, checked
  * before the copy rather than after. */
-KhzSheetStatus khz_inflate_raw(const void *input,
+KHZ_API KhzSheetStatus khz_inflate_raw(const void *input,
                                size_t input_bytes,
                                void *output,
                                size_t output_capacity,
@@ -150,7 +152,7 @@ KhzSheetStatus khz_inflate_raw(const void *input,
  * which is how the xlsx reader already works. An arena has no free, so
  * releasing to a mark is the only correct cleanup, and doing it here would
  * discard allocations the caller made before this call. */
-KhzSheetStatus khz_inflate_to_arena(KhzArena *arena,
+KHZ_API KhzSheetStatus khz_inflate_to_arena(KhzArena *arena,
                                     const void *input,
                                     size_t input_bytes,
                                     size_t expected_bytes,
@@ -159,12 +161,12 @@ KhzSheetStatus khz_inflate_to_arena(KhzArena *arena,
 
 /* Runs the decoder against known-answer vectors built into the source.
  * Returns the number of failures, zero meaning all matched. */
-int khz_inflate_selftest(void);
+KHZ_API int khz_inflate_selftest(void);
 
 /* Always 1 in this build. Present so the ABI layer can report the decoder's
  * presence the same way it reports the ledger and the xlsx writer, rather
  * than the C# side inferring it from a version number. */
-int khz_inflate_available(void);
+KHZ_API int khz_inflate_available(void);
 
 #ifdef __cplusplus
 }
