@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include "khz_grid.h"
 #include "khz_hash.h"
 #include "khz_rational.h"
@@ -868,6 +872,27 @@ KhzSheetStatus khz_xlsx_build(const KhzSheet *sheet, KhzArena *scratch,
     return KHZ_SHEET_OK;
 }
 
+static FILE *khz_xlsx_open_stage(const char *path)
+{
+    FILE *file = NULL;
+#if defined(_MSC_VER)
+    if (fopen_s(&file, path, "wbx") != 0) file = NULL;
+#else
+    file = fopen(path, "wbx");
+#endif
+    return file;
+}
+
+static int khz_xlsx_replace_stage(const char *stage_path, const char *path)
+{
+#if defined(_WIN32)
+    return MoveFileExA(stage_path, path,
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    return rename(stage_path, path) == 0;
+#endif
+}
+
 KhzSheetStatus khz_xlsx_write(const KhzSheet *sheet, KhzArena *scratch,
                               const char *path, const char *sheet_name,
                               KhzXlsxReport *report)
@@ -878,6 +903,8 @@ KhzSheetStatus khz_xlsx_write(const KhzSheet *sheet, KhzArena *scratch,
     size_t path_len;
     KhzSheetStatus status;
     FILE *file;
+    static const char stage_suffix[] = ".khz.tmp";
+    char stage_path[KHZ_XLSX_MAX_PATH + sizeof stage_suffix];
 
     if (sheet == NULL || scratch == NULL || path == NULL) return KHZ_SHEET_ERR_NULL;
     path_len = strlen(path);
@@ -890,21 +917,27 @@ KhzSheetStatus khz_xlsx_write(const KhzSheet *sheet, KhzArena *scratch,
         return status;
     }
 
-#if defined(_MSC_VER)
-    if (fopen_s(&file, path, "wb") != 0) file = NULL;
-#else
-    file = fopen(path, "wb");
-#endif
+    memcpy(stage_path, path, path_len);
+    memcpy(stage_path + path_len, stage_suffix, sizeof stage_suffix);
+
+    file = khz_xlsx_open_stage(stage_path);
     if (file == NULL) {
         (void)khz_arena_release(scratch, mark);
         return KHZ_SHEET_ERR_OS;
     }
-    if (fwrite(bytes, (size_t)1, length, file) != length) {
-        fclose(file);
+    if (fwrite(bytes, (size_t)1, length, file) != length || fflush(file) != 0) {
+        (void)fclose(file);
+        (void)remove(stage_path);
         (void)khz_arena_release(scratch, mark);
         return KHZ_SHEET_ERR_OS;
     }
     if (fclose(file) != 0) {
+        (void)remove(stage_path);
+        (void)khz_arena_release(scratch, mark);
+        return KHZ_SHEET_ERR_OS;
+    }
+    if (!khz_xlsx_replace_stage(stage_path, path)) {
+        (void)remove(stage_path);
         (void)khz_arena_release(scratch, mark);
         return KHZ_SHEET_ERR_OS;
     }
